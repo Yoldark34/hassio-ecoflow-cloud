@@ -3,8 +3,9 @@
 
 usage: uv run python scripts/ef_make_fixture.py <capture.jsonl> <out.jsonl> [--max-per-kind N]
 Serial-like ASCII runs (16 upper-case letters/digits mixing both) become fakes of the same
-length that keep the 4-char product prefix, so protobuf lengths stay valid. Topics are reduced
-to (api, kind, device prefix) so no account id survives. Check the output before committing.
+length that keep the 4-char product prefix, so protobuf lengths stay valid; --scrub-int replaces
+numeric ids such as the pack's systemGroupId the same way. Topics are reduced to (api, kind,
+device prefix) so no account id survives. Check the output before committing.
 """
 
 import argparse
@@ -22,6 +23,27 @@ def fake_for(serial: bytes, table: dict[bytes, bytes]) -> bytes:
     return table[serial]
 
 
+def varint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = n & 0x7F
+        n >>= 7
+        out.append(byte | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def scrub_ints(payload: bytes, ints: list[int]) -> bytes:
+    """Replace identifiers carried as protobuf varints (e.g. the pack's systemGroupId) by fakes of equal length."""
+    for value in ints:
+        old = varint(value)
+        fake = 10 ** (len(str(value)) - 1) + 12345
+        if fake == value or len(varint(fake)) != len(old):
+            raise ValueError(f"no same-length fake for {value}")
+        payload = payload.replace(old, varint(fake))
+    return payload
+
+
 def scrub(payload: bytes, table: dict[bytes, bytes]) -> bytes:
     def repl(m: re.Match[bytes]) -> bytes:
         s = m.group(0)
@@ -37,6 +59,8 @@ def main() -> None:
     ap.add_argument("capture")
     ap.add_argument("out")
     ap.add_argument("--max-per-kind", type=int, default=0, help="0 keeps every frame")
+    ap.add_argument("--scrub-int", type=int, action="append", default=[],
+                    help="integer id to replace, e.g. the pack's systemGroupId (repeatable)")
     args = ap.parse_args()
 
     table: dict[bytes, bytes] = {}
@@ -55,7 +79,7 @@ def main() -> None:
                 continue
             kept[key] += 1
             t0 = t0 if t0 is not None else r["t"]
-            payload = scrub(bytes.fromhex(r["hex"]), table)
+            payload = scrub_ints(scrub(bytes.fromhex(r["hex"]), table), args.scrub_int)
             out.write(json.dumps({"dt": round(r["t"] - t0, 3), "api": r["api"], "kind": kind,
                                   "device": prefix, "hex": payload.hex()}) + "\n")
     for k, v in sorted(kept.items()):
