@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from custom_components.ecoflow_cloud.devices.data_coordinator import EcoflowBroadcastDataHolder
 from custom_components.ecoflow_cloud.devices.internal.stream_ac_5000 import StreamAC5000
 from custom_components.ecoflow_cloud.sensor import WattsSensorEntity
@@ -33,7 +31,6 @@ async def test_reporting_device_is_available(hass):
     assert sensor.native_value == 470.0
 
 
-@pytest.mark.xfail(strict=True, reason="entities never leave available once set")
 async def test_offline_device_turns_unavailable(hass):
     device, sensor = _sensor(hass)
     device.status_tracker.on_explicit_status(False)
@@ -47,6 +44,41 @@ async def test_device_back_online_is_available_again(hass):
     device.status_tracker.on_explicit_status(False)
     _tick(device, changed=False)
     sensor._handle_coordinator_update()
+    device.status_tracker.on_data_received()
+    _tick(device, changed=True)
+    sensor._handle_coordinator_update()
+    assert sensor.available
+
+
+async def test_offline_resets_the_value_it_will_come_back_with(hass):
+    device, sensor = _sensor(hass)
+    device.status_tracker.on_explicit_status(False)
+    _tick(device, changed=False)
+    sensor._handle_coordinator_update()
+    assert device.data.params["bpPower"] == 0
+
+
+async def test_offline_keeps_the_value_when_reset_is_off(hass):
+    device, sensor = _sensor(hass, reset_sensors_on_offline=False)
+    device.status_tracker.on_explicit_status(False)
+    _tick(device, changed=False)
+    sensor._handle_coordinator_update()
+    assert not sensor.available
+    assert device.data.params["bpPower"] == 470.0
+
+
+async def test_entity_with_its_own_update_comes_back(hass):
+    class OwnUpdate(WattsSensorEntity):
+        def _updated(self, data):
+            self._attr_native_value = data.get("bpPower")
+
+    device = make_device(StreamAC5000, "ES22TEST00000001", "STREAM_AC_5000")
+    device.configure(hass)
+    sensor = detach(OwnUpdate(fake_client(), device, "bpPower", "Battery Power"))
+    device.status_tracker.on_explicit_status(False)
+    _tick(device, changed=False)
+    sensor._handle_coordinator_update()
+    assert not sensor.available
     device.status_tracker.on_data_received()
     _tick(device, changed=True)
     sensor._handle_coordinator_update()

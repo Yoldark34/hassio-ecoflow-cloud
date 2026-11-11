@@ -123,6 +123,7 @@ class EcoFlowDictEntity(EcoFlowAbstractDataEntity):
         self._attr_entity_registry_enabled_default = enabled
         self._attr_entity_registry_visible_default = enabled
         self._attr_available = enabled
+        self._shown_offline = False
         self.__attributes_mapping: dict[str, tuple[JSONPath, str]] = {}
         self.__attrs = OrderedDict[str, Any]()
         if diagnostic is not None:
@@ -151,6 +152,16 @@ class EcoFlowDictEntity(EcoFlowAbstractDataEntity):
     def enabled_default(self):
         return self._attr_entity_registry_enabled_default
 
+    @property
+    def available(self) -> bool:
+        # CoordinatorEntity only looks at the coordinator, which never fails here,
+        # so without this the entity's own availability was never shown
+        return (
+            CoordinatorEntity.available.fget(self)  # type: ignore[attr-defined]
+            and self._attr_available
+            and not self._device.status_tracker.is_offline
+        )
+
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
         # d = self._device.data.params_observable().subscribe(self._updated)
@@ -159,13 +170,20 @@ class EcoFlowDictEntity(EcoFlowAbstractDataEntity):
     def _handle_coordinator_update(self) -> None:
         if self.coordinator.data.changed:
             self._updated(self.coordinator.data.data_holder.params)
-        elif (  # noqa: SIM102
-            self._device.status_tracker.is_offline and self._device.device_data.options.reset_sensors_on_offline
-        ):
-            # Reset sensors that should reset to default values
-            if isinstance(self, BaseSensorEntity) and self._attr_default_value is not None:
+        elif self._device.status_tracker.is_offline:
+            # Reset first, so the value the entity comes back with is not a stale reading
+            if (
+                self._device.device_data.options.reset_sensors_on_offline
+                and isinstance(self, BaseSensorEntity)
+                and self._attr_default_value is not None
+            ):
                 self._mqtt_key_expr.update(self.coordinator.data.data_holder.params, self._attr_default_value)
                 self._updated(self.coordinator.data.data_holder.params)
+        # A device that is off reports nothing: show that rather than its last value
+        offline = self._device.status_tracker.is_offline
+        if offline != self._shown_offline:
+            self._shown_offline = offline
+            self.schedule_update_ha_state()
 
     def _updated(self, data: dict[str, Any]):
         # update attributes
