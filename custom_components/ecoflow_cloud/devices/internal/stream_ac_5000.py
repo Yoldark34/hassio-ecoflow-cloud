@@ -312,8 +312,9 @@ class StreamSystemControls:
             WattsSensorEntity(c, d, "sysEnergyStreamReport.backupPwr", const.STREAM_AC5000_SYS_BACKUP_POWER, False),
             WattsSensorEntity(c, d, "meterTotalPower", const.SMART_METER_POWER_GLOBAL),
             WattsSensorEntity(c, d, "meterPhaseAPower", const.SMART_METER_POWER_L1),
-            WattsSensorEntity(c, d, "meterPhaseBPower", const.SMART_METER_POWER_L2),
-            WattsSensorEntity(c, d, "meterPhaseCPower", const.SMART_METER_POWER_L3),
+            # single-phase homes never get L2/L3 (zero is left off the wire): opt in for three-phase
+            WattsSensorEntity(c, d, "meterPhaseBPower", const.SMART_METER_POWER_L2, False),
+            WattsSensorEntity(c, d, "meterPhaseCPower", const.SMART_METER_POWER_L3, False),
             VoltSensorEntity(c, d, "meterPhaseAVol", const.SMART_METER_VOLT_L1, False),
             VoltSensorEntity(c, d, "meterPhaseBVol", const.SMART_METER_VOLT_L2, False),
             VoltSensorEntity(c, d, "meterPhaseCVol", const.SMART_METER_VOLT_L3, False),

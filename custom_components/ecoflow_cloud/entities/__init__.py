@@ -11,6 +11,7 @@ from homeassistant.components.number import NumberEntity
 from homeassistant.components.select import SelectEntity
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo, Entity, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from jsonpath_ng import JSONPath
@@ -47,7 +48,13 @@ class EcoFlowAbstractEntity(Entity):
         pack = getattr(self._device, "pack", None)
         if pack is not None:
             # units of a pack show under it, like the app's system view
-            info["via_device"] = (ECOFLOW_DOMAIN, f"{self._type_prefix()}{pack.device_data.sn}")
+            pack_id = (ECOFLOW_DOMAIN, f"{self._type_prefix()}{pack.device_data.sn}")
+            registered = dr.async_get(self.hass).async_get_device(identifiers={pack_id}) if self.hass else None
+            if registered is not None:
+                info["via_device_id"] = registered.id
+            else:
+                # first start only: the pack's own entities may not have registered it yet
+                info["via_device"] = pack_id
         return info
 
     def _type_prefix(self):

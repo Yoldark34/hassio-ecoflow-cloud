@@ -343,9 +343,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             # a room of the app's home becomes the device's suggested area
             api_client.devices[sn].suggested_area = space.name
 
-    for pack in await _discover_packs(api_client, spaces):
-        api_client.add_device(pack)
-        pack.configure(hass)
+    packs = await _discover_packs(api_client, spaces)
+    if packs:
+        # packs first, so their device is registered before the units that point at it
+        units = list(api_client.devices.items())
+        api_client.devices.clear()
+        for pack in packs:
+            api_client.add_device(pack)
+            pack.configure(hass)
+        api_client.devices.update(units)
 
     def request_reauth() -> None:
         # called from the paho thread once EcoFlow rejects the MQTT credentials

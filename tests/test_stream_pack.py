@@ -12,6 +12,7 @@ from custom_components.ecoflow_cloud.api.hybrid_api import EcoflowHybridApiClien
 from custom_components.ecoflow_cloud.api.message import OpenAPICommand
 from custom_components.ecoflow_cloud.api.private_api import EcoflowPrivateApiClient
 from custom_components.ecoflow_cloud.devices.internal.stream_ac_5000 import StreamAC5000CommandMessage, StreamAC5000
+from custom_components.ecoflow_cloud.devices.data_holder import PreparedData
 from custom_components.ecoflow_cloud.devices.internal.stream_pack import StreamPack, build_packs
 from custom_components.ecoflow_cloud.number import MinMaxLevelEntity
 from custom_components.ecoflow_cloud.select import PowerDictSelectEntity
@@ -190,3 +191,15 @@ async def test_a_room_of_the_app_becomes_the_suggested_area(hass, pack, units):
     assert in_room["suggested_area"] == "Garage"
     assert "suggested_area" not in no_room
     assert in_room["via_device"] == ("ecoflow_cloud", pack.device_info.sn)
+
+
+def test_roles_start_from_the_app_main_unit(units):
+    (pack,) = build_packs([_system(main_sn=ES21)], dict(units))
+    assert units[ES21].data.params["systemRole"] == 1
+    assert units[ES22].data.params["systemRole"] == 2
+    assert pack.data.params["masterSn"] == ES21
+    # a unit's own report wins
+    units[ES22].data.add_data(PreparedData(None, {"params": {"systemRole": 1}}, None))
+    units[ES21].data.add_data(PreparedData(None, {"params": {"systemRole": 2}}, None))
+    assert pack.master_sn() == ES22
+    assert pack.data.params["masterSn"] == ES22

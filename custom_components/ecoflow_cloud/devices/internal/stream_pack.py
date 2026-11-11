@@ -64,6 +64,7 @@ _PACK_KEYS = frozenset(
 _PACK_PREFIXES = ("sysEnergyStreamReport.", "bpBackupConfig.", "powerParameterConfig.")
 
 _MASTER = 1
+_SLAVE = 2
 
 PACK_STATES = ["ready", "degraded", "waiting", "offline"]
 
@@ -122,7 +123,22 @@ class StreamPack(BaseDevice):
         pack.suggested_area = members[0].suggested_area
         for member in members:
             pack.add_member(member)
+        pack._assume_roles_from_app()
         return pack
+
+    def _assume_roles_from_app(self) -> None:
+        """Roles until the units report theirs: the app's main unit leads.
+
+        A unit sends its role only in full uploads, minutes apart, so without this the
+        role and master sensors would start unknown.
+        """
+        main_sn = self.system.main_sn
+        if main_sn is None or self.member(main_sn) is None:
+            return
+        for member in self.members:
+            if KEY_SYSTEM_ROLE not in member.data.params:
+                role = _MASTER if member.device_info.sn == main_sn else _SLAVE
+                member.data.add_data(PreparedData(None, {"params": {KEY_SYSTEM_ROLE: role}}, None, is_auto=False))
 
     def add_member(self, member: StreamAC5000) -> None:
         self.members.append(member)
