@@ -66,6 +66,10 @@ _LOGGER = logging.getLogger(__name__)
 API_SELECT_DEVICE_SCHEMA = vol.Schema({vol.Required(CONF_SELECT_DEVICE_KEY): str})
 
 CONF_DISCOVERED: str = "devices"
+DEFAULT_GROUP = "EcoFlow"
+_CREDENTIAL_KEYS = frozenset(
+    {CONF_API_HOST, CONF_USERNAME, CONF_PASSWORD, CONF_OPEN_API_HOST, CONF_ACCESS_KEY, CONF_SECRET_KEY}
+)
 
 # Region -> host, shown with the host so the choice is explicit
 APP_API_HOSTS = {"api-e.ecoflow.com": "EU", "api.ecoflow.com": "US"}
@@ -96,6 +100,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
         self.cloud_devices: dict[str, EcoflowDeviceInfo] = {}
         self.local_devices: dict[str, DeviceData] = {}
         self.discovered: dict[str, EcoflowDeviceInfo] = {}
+        self.entry_title: str | None = None
 
     def set_current_config_entry(self, config_entry: ConfigEntry) -> None:
         self.config_entry = config_entry
@@ -177,7 +182,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
                     self.new_options[CONF_DEVICE_LIST][sub_device_sn] = self.new_options[CONF_DEVICE_LIST][sn]
 
             return self.async_create_entry(
-                title=self.new_data[CONF_GROUP],
+                title=self._entry_title(),
                 data=self.new_data,
                 options=self.new_options,
             )
@@ -206,23 +211,51 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
             device_reg.async_remove_device(device.id)
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
-        if self.config_entry:  # reconfigure flow
-            return await self.async_step_choose_type()
-
-        if not user_input:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=vol.Schema({vol.Required(CONF_GROUP, default=self.new_data.get(CONF_GROUP, "Home")): str}),
-            )
-
-        self.new_data[CONF_GROUP] = user_input.get(CONF_GROUP)
-        existing_entry = await self.async_set_unique_id("group-" + self.new_data[CONF_GROUP], raise_on_progress=False)
-
-        if existing_entry:
-            # adding to a group that exists is reconfiguring it: carry on there instead of sending the user away
-            self.set_current_config_entry(existing_entry)
-
+        if not self.config_entry:
+            # One entry per EcoFlow account: what it groups (homes, rooms, packs) comes from
+            # the account once logged in. The group only names the open-API MQTT client.
+            self.new_data.setdefault(CONF_GROUP, DEFAULT_GROUP)
         return await self.async_step_choose_type()
+
+    async def _adopt_existing_account(self) -> bool:
+        """After the login of a new entry: when this account already has one, carry on as its reconfiguration."""
+        if self.config_entry:
+            return False
+        if CONF_USERNAME in self.new_data:
+            unique_id = f"account-{self.auth.user_id}"
+            username = self.new_data[CONF_USERNAME].lower()
+
+            def same(entry: ConfigEntry) -> bool:
+                return str(entry.data.get(CONF_USERNAME, "")).lower() == username
+        else:
+            unique_id = f"open-{self.new_data[CONF_ACCESS_KEY]}"
+            access_key = self.new_data[CONF_ACCESS_KEY]
+
+            def same(entry: ConfigEntry) -> bool:
+                return entry.data.get(CONF_ACCESS_KEY) == access_key and CONF_USERNAME not in entry.data
+
+        existing = await self.async_set_unique_id(unique_id, raise_on_progress=False)
+        if existing is None:
+            # entries made before accounts were the key are found by their credentials
+            existing = next((e for e in self.hass.config_entries.async_entries(ECOFLOW_DOMAIN) if same(e)), None)
+        if existing is None:
+            return False
+
+        credentials = {k: v for k, v in self.new_data.items() if k in _CREDENTIAL_KEYS}
+        self.set_current_config_entry(existing)
+        # the credentials just entered win, e.g. developer keys added to an app-API entry
+        self.new_data.update(credentials)
+        self.set_local_device_list(list(extract_devices(existing).values()))
+        return True
+
+    def _account_menu(self):
+        options = ["discover_devices", "manual_add_device", "remove_device", "finish"]
+        if not is_hybrid_entry(self.new_data):
+            options.insert(2, "open_api_keys")
+        return self.async_show_menu(step_id="manual", menu_options=options)
+
+    def _entry_title(self) -> str:
+        return self.entry_title or self.new_data.get(CONF_USERNAME) or "EcoFlow"
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None):
         self.set_current_config_entry(self.hass.config_entries.async_get_entry(self.context["entry_id"]))
@@ -236,7 +269,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
         public_api = is_public_entry(self.new_data)
 
         # HA fills "name" from the entry title on newer cores; set it so older ones match
-        placeholders = {"name": self.new_data.get(CONF_GROUP, "")}
+        placeholders = {"name": self.config_entry.title if self.config_entry else ""}
 
         if not user_input:
             return self.async_show_form(
@@ -374,6 +407,8 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
             return self.async_abort(reason="unknown")
         if errors:
             return self.async_show_form(step_id="hybrid", data_schema=self._hybrid_schema(), errors=errors)
+        if await self._adopt_existing_account():
+            return self._account_menu()
         return await self.async_step_discover_devices()
 
     async def async_step_open_api_keys(self, user_input: dict[str, Any] | None = None):
@@ -452,7 +487,21 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
             self.new_options[CONF_DEVICE_LIST].setdefault(sn, default_device_options(device.device_type))
         if not self.new_data[CONF_DEVICE_LIST]:
             return self.async_abort(reason="no_device_to_add")
+        if not self.config_entry:
+            self.entry_title = await self._home_name(list(self.new_data[CONF_DEVICE_LIST]))
         return await self.update_or_create()
+
+    async def _home_name(self, sns: list[str]) -> str | None:
+        """The name of the app's home holding these devices, to title the entry."""
+        fetch = getattr(self.auth, "fetch_device_spaces", None)
+        if fetch is None:
+            return None
+        try:
+            spaces = await fetch(sns)
+        except Exception as e:  # pylint: disable=broad-except
+            _LOGGER.debug("No space names: %s", e)
+            return None
+        return next((space.name for space in spaces.values() if space.is_root and space.name), None)
 
     def _schema_for(self, public_api: bool) -> vol.Schema:
         return self._api_schema() if public_api else self._manual_schema()
@@ -520,12 +569,10 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
                     self.auth = self._create_manual_client()
                     await self.auth.login()
 
-            options = ["discover_devices", "manual_add_device", "remove_device", "finish"]
-            if not is_hybrid_entry(self.new_data):
-                options.insert(2, "open_api_keys")
-            return self.async_show_menu(step_id="manual", menu_options=options)
-        else:
-            return await self.async_step_discover_devices()
+            return self._account_menu()
+        if await self._adopt_existing_account():
+            return self._account_menu()
+        return await self.async_step_discover_devices()
 
     async def async_step_manual_add_device(self, user_input: dict[str, Any] | None = None):
         return await self.async_step_manual_device_input()
@@ -605,8 +652,9 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
                 step_id="api",
                 menu_options=["api_add_device", "remove_device", "finish"],
             )
-        else:
-            return await self.async_step_select_device()
+        if await self._adopt_existing_account():
+            return self.async_show_menu(step_id="api", menu_options=["api_add_device", "remove_device", "finish"])
+        return await self.async_step_select_device()
 
     async def async_step_api_add_device(self, user_input: dict[str, Any] | None = None):
         return await self.async_step_select_device()

@@ -10,6 +10,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ecoflow_cloud import CONFIG_VERSION, ECOFLOW_DOMAIN
+from custom_components.ecoflow_cloud.api import EcoflowSpace
 from custom_components.ecoflow_cloud.config_flow import APP_API_HOSTS, OPEN_API_HOSTS, _host_selector
 from custom_components.ecoflow_cloud.devices import EcoflowDeviceInfo
 
@@ -31,6 +32,14 @@ def _found() -> list[EcoflowDeviceInfo]:
     return devices
 
 
+async def _login(self):
+    self.user_id = "42"
+
+
+HOME = {ES21: EcoflowSpace("100", "Ma maison", True), ES22: EcoflowSpace("100", "Ma maison", True)}
+PRIVATE = "custom_components.ecoflow_cloud.api.private_api.EcoflowPrivateApiClient"
+
+
 @pytest.fixture(autouse=True)
 def no_setup():
     with patch("custom_components.ecoflow_cloud.async_setup_entry", return_value=True):
@@ -46,14 +55,15 @@ def test_region_options_show_their_host():
 
 async def test_hybrid_entry_adds_the_discovered_devices(hass):
     with (
-        patch("custom_components.ecoflow_cloud.api.hybrid_api.EcoflowHybridApiClient.login", AsyncMock()),
+        patch("custom_components.ecoflow_cloud.api.hybrid_api.EcoflowHybridApiClient.login", _login),
         patch(
             "custom_components.ecoflow_cloud.api.hybrid_api.EcoflowHybridApiClient.fetch_all_available_devices",
             AsyncMock(return_value=_found()),
         ),
+        patch(f"{PRIVATE}.fetch_device_spaces", AsyncMock(return_value=HOME)),
     ):
         result = await hass.config_entries.flow.async_init(ECOFLOW_DOMAIN, context={"source": config_entries.SOURCE_USER})
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"group": "Home"})
+        # no name to invent: the API comes first
         assert result["type"] is FlowResultType.MENU
         assert result["menu_options"][0] == "hybrid"
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "hybrid"})
@@ -77,6 +87,8 @@ async def test_hybrid_entry_adds_the_discovered_devices(hass):
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"devices": default})
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Ma maison"
+    assert result["result"].unique_id == "account-42"
     assert result["data"]["auto_add_devices"] is True
     data = result["data"]
     assert data["access_key"] == "ak"
@@ -103,9 +115,9 @@ async def test_keys_turn_an_app_entry_hybrid_and_retype_its_units(hass):
                                          "reset_sensors_on_offline": True}}},
     )
     entry.add_to_hass(hass)
-    private = "custom_components.ecoflow_cloud.api.private_api.EcoflowPrivateApiClient"
+    private = PRIVATE
     with (
-        patch(f"{private}.login", AsyncMock()),
+        patch(f"{private}.login", _login),
         patch(f"{private}.fetch_all_available_devices", AsyncMock(return_value=_found())),
         patch("custom_components.ecoflow_cloud.api.public_api.EcoflowPublicApiClient.login", AsyncMock()),
     ):
@@ -125,7 +137,7 @@ async def test_keys_turn_an_app_entry_hybrid_and_retype_its_units(hass):
     assert "power_step" in entry.options["devices_list"][ES21]
 
     with (
-        patch(f"{private}.login", AsyncMock()),
+        patch(f"{private}.login", _login),
         patch("custom_components.ecoflow_cloud.api.public_api.EcoflowPublicApiClient.login", AsyncMock()),
     ):
         result = await entry.start_reconfigure_flow(hass)
@@ -143,34 +155,42 @@ async def test_keys_turn_an_app_entry_hybrid_and_retype_its_units(hass):
     assert entry.data["username"] == "me@example.com"
 
 
-async def test_adding_an_existing_group_continues_as_its_reconfiguration(hass):
+async def test_adding_an_account_that_has_an_entry_continues_as_its_reconfiguration(hass):
+    # an entry from before accounts were the key: found by its email, whatever its group
     entry = MockConfigEntry(
         domain=ECOFLOW_DOMAIN,
         version=CONFIG_VERSION,
         unique_id="group-Home",
         title="Home",
-        data={"group": "Home", "api_host": "api-e.ecoflow.com", "username": "me@example.com", "password": "pw",
+        data={"group": "Home", "api_host": "api-e.ecoflow.com", "username": "Me@Example.com", "password": "old",
               "devices_list": {}},
         options={"devices_list": {}},
     )
     entry.add_to_hass(hass)
-    private = "custom_components.ecoflow_cloud.api.private_api.EcoflowPrivateApiClient"
     with (
-        patch(f"{private}.login", AsyncMock()),
-        patch(f"{private}.fetch_all_available_devices", AsyncMock(return_value=_found())),
+        patch("custom_components.ecoflow_cloud.api.hybrid_api.EcoflowHybridApiClient.login", _login),
+        patch(
+            "custom_components.ecoflow_cloud.api.hybrid_api.EcoflowHybridApiClient.fetch_all_available_devices",
+            AsyncMock(return_value=_found()),
+        ),
     ):
         result = await hass.config_entries.flow.async_init(ECOFLOW_DOMAIN, context={"source": config_entries.SOURCE_USER})
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"group": "Home"})
-        # straight to the existing entry's credentials, no abort
-        assert result["step_id"] == "manual"
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "hybrid"})
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"api_host": "api-e.ecoflow.com", "username": "me@example.com", "password": "pw"}
+            result["flow_id"],
+            {"api_host": "api-e.ecoflow.com", "username": "me@example.com", "password": "new",
+             "open_api_host": "api-e.ecoflow.com", "access_key": "ak", "secret_key": "sk"},
         )
+        # straight to that entry's menu, already hybrid: no keys to add any more
+        assert result["type"] is FlowResultType.MENU
+        assert "open_api_keys" not in result["menu_options"]
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "discover_devices"})
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"devices": [ES22]})
     assert result["reason"] == "reconfigure_successful"
-    assert list(entry.data["devices_list"]) == [ES22]
     assert len(hass.config_entries.async_entries(ECOFLOW_DOMAIN)) == 1
+    assert entry.data["password"] == "new"
+    assert entry.data["access_key"] == "ak"
+    assert list(entry.data["devices_list"]) == [ES22]
 
 
 async def test_new_account_devices_are_added_at_start(hass):

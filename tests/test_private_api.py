@@ -21,7 +21,7 @@ USER_DEVICES = {
         "share": {"HW52TEST00000001": {"deviceName": "Smart Plug-0001", "productType": 1, "online": 1}},
     },
 }
-SPACE = {"code": "0", "data": {"spaceId": "100", "rootSpaceId": "100"}}
+SPACE = {"code": "0", "data": {"spaceId": "100", "rootSpaceId": "100", "spaceName": "Home", "isRootSpace": 1}}
 SPACE_DEVICES = {
     "code": "0",
     "data": {
@@ -98,3 +98,19 @@ async def test_systems_list_the_pack_and_its_main_unit(client):
 )
 def test_type_by_serial_prefix(sn, expected):
     assert device_type_for(sn) == expected
+
+
+async def test_spaces_tell_the_home_from_its_rooms(client, monkeypatch):
+    answers = {
+        "ES22TEST00000001": {"spaceId": "100", "rootSpaceId": "100", "spaceName": "Home", "isRootSpace": 1},
+        "ES21TEST00000001": {"spaceId": "101", "rootSpaceId": "100", "spaceName": "Garage", "isRootSpace": 0},
+    }
+
+    async def fake_call(endpoint, params=None):
+        return {"code": "0", "data": answers[params["sn"]]}
+
+    monkeypatch.setattr(client, "_EcoflowPrivateApiClient__call_api", fake_call)
+    spaces = await client.fetch_device_spaces(list(answers))
+    assert spaces["ES22TEST00000001"].is_root
+    assert not spaces["ES21TEST00000001"].is_root
+    assert spaces["ES21TEST00000001"].name == "Garage"

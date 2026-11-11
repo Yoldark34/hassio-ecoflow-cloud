@@ -119,6 +119,7 @@ class StreamPack(BaseDevice):
         )
         data = DeviceData(sn, system.name, PACK_DEVICE_TYPE, members[0].device_data.options, None, None)
         pack = StreamPack(info, data, system)
+        pack.suggested_area = members[0].suggested_area
         for member in members:
             pack.add_member(member)
         return pack

@@ -9,7 +9,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.util import uuid
 
 from ..devices import EcoflowDeviceInfo
-from . import API_RESPONSE_TO_REDACT, EcoflowApiClient, EcoflowAuthException, EcoflowException, EcoflowSystem
+from . import API_RESPONSE_TO_REDACT, EcoflowApiClient, EcoflowAuthException, EcoflowException, EcoflowSpace, EcoflowSystem
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,16 +91,26 @@ class EcoflowPrivateApiClient(EcoflowApiClient):
             result.append(self._create_device_info(sn, name, device_type, int(device.get("online", -1))))
         return result
 
-    async def fetch_systems(self, sns: list[str]) -> list[EcoflowSystem]:
+    async def fetch_device_spaces(self, sns: list[str]) -> dict[str, EcoflowSpace]:
+        """The app space of each device: its home, or a room of it."""
+        spaces: dict[str, EcoflowSpace] = {}
+        for sn in sns:
+            info = (await self.__call_api("/app/space/getSpaceInfoBySn", {"sn": sn})).get("data") or {}
+            if info.get("spaceId"):
+                spaces[sn] = EcoflowSpace(
+                    space_id=str(info["spaceId"]),
+                    name=info.get("spaceName") or "",
+                    is_root=int(info.get("isRootSpace", 0)) == 1 or info.get("spaceId") == info.get("rootSpaceId"),
+                )
+        return spaces
+
+    async def fetch_systems(
+        self, sns: list[str], known_spaces: dict[str, EcoflowSpace] | None = None
+    ) -> list[EcoflowSystem]:
         """The systems (packs) the app groups the given devices into, with their master unit."""
         systems: dict[str, EcoflowSystem] = {}
-        spaces: set[str] = set()
-        for sn in sns:
-            info = await self.__call_api("/app/space/getSpaceInfoBySn", {"sn": sn})
-            space_id = (info.get("data") or {}).get("spaceId")
-            if not space_id or space_id in spaces:
-                continue
-            spaces.add(space_id)
+        spaces = known_spaces if known_spaces is not None else await self.fetch_device_spaces(sns)
+        for space_id in {spaces[sn].space_id for sn in sns if sn in spaces}:
             listing = await self.__call_api("/app/space/v3/all/device/list", {"spaceId": space_id})
             for system in (listing.get("data") or {}).get("systemList") or []:
                 parsed = EcoflowSystem.from_api(system)

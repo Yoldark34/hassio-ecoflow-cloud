@@ -42,6 +42,8 @@ class EcoFlowAbstractEntity(Entity):
             model=self._device.device_data.device_type,
             serial_number=self._device.device_data.sn,
         )
+        if self._device.suggested_area:
+            info["suggested_area"] = self._device.suggested_area
         pack = getattr(self._device, "pack", None)
         if pack is not None:
             # units of a pack show under it, like the app's system view

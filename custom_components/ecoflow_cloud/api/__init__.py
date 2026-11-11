@@ -41,6 +41,15 @@ class EcoflowMqttInfo:
 
 
 @dataclass
+class EcoflowSpace:
+    """Where the app places a device: the home (root space) or a room inside it."""
+
+    space_id: str
+    name: str
+    is_root: bool
+
+
+@dataclass
 class EcoflowSystem:
     """A group of devices the app shows as one system, e.g. linked STREAM batteries."""
 

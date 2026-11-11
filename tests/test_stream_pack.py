@@ -177,3 +177,16 @@ async def test_solar_sensors_only_on_units_with_solar_inputs(hass, pack, units):
     assert {"unitPvPower", "pv1Power", "pv4Power"} <= enabled_keys(units[ES21])
     assert not any(k.startswith(("pv", "unitPv")) for k in enabled_keys(units[ES22]))
     assert {"unitOnGridPower", "remainCap", "batteryPower"} <= enabled_keys(units[ES22])
+
+
+async def test_a_room_of_the_app_becomes_the_suggested_area(hass, pack, units):
+    from custom_components.ecoflow_cloud.sensor import WattsSensorEntity
+
+    units[ES21].configure(hass)
+    units[ES22].configure(hass)
+    units[ES21].suggested_area = "Garage"
+    in_room = WattsSensorEntity(fake_client(), units[ES21], "batteryPower", "Battery Power").device_info
+    no_room = WattsSensorEntity(fake_client(), units[ES22], "batteryPower", "Battery Power").device_info
+    assert in_room["suggested_area"] == "Garage"
+    assert "suggested_area" not in no_room
+    assert in_room["via_device"] == ("ecoflow_cloud", pack.device_info.sn)

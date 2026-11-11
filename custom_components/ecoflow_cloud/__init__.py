@@ -337,7 +337,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         device = api_client.configure_device(device_data, api_devices_map)
         device.configure(hass)
 
-    for pack in await _discover_packs(api_client):
+    spaces = await _fetch_spaces(api_client)
+    for sn, space in spaces.items():
+        if not space.is_root and sn in api_client.devices:
+            # a room of the app's home becomes the device's suggested area
+            api_client.devices[sn].suggested_area = space.name
+
+    for pack in await _discover_packs(api_client, spaces):
         api_client.add_device(pack)
         pack.configure(hass)
 
@@ -411,7 +417,18 @@ def _add_new_account_devices(hass: HomeAssistant, entry: ConfigEntry, found) -> 
     return {sn: new_devices[sn] for sn in added}
 
 
-async def _discover_packs(api_client: EcoflowApiClient) -> list:
+async def _fetch_spaces(api_client: EcoflowApiClient) -> dict:
+    fetch = getattr(api_client, "fetch_device_spaces", None)
+    if fetch is None or not api_client.devices:
+        return {}
+    try:
+        return await fetch(list(api_client.devices))
+    except Exception as ex:
+        _LOGGER.warning("Could not read the EcoFlow spaces of the devices: %s", ex)
+        return {}
+
+
+async def _discover_packs(api_client: EcoflowApiClient, spaces: dict | None = None) -> list:
     """Group linked STREAM units into the systems the app shows, when the API can list them."""
     fetch_systems = getattr(api_client, "fetch_systems", None)
     if fetch_systems is None:
@@ -423,7 +440,7 @@ async def _discover_packs(api_client: EcoflowApiClient) -> list:
     if len(sns) < 2:
         return []
     try:
-        systems = await fetch_systems(sns)
+        systems = await fetch_systems(sns, spaces)
     except Exception as ex:
         # without the system list each unit still works on its own
         _LOGGER.warning("Could not list EcoFlow systems, STREAM units stay ungrouped: %s", ex)

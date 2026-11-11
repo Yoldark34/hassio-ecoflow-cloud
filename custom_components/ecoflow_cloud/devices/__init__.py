@@ -67,6 +67,9 @@ class NoQuotaMessageError(Exception):
 
 
 class BaseDevice(ABC):
+    # the room the app places the device in, offered to Home Assistant as its area
+    suggested_area: str | None = None
+
     def __init__(self, device_info: EcoflowDeviceInfo, device_data: DeviceData):
         super().__init__()
         self.coordinator: DeviceDataCoordinator
