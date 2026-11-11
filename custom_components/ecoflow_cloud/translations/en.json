@@ -17,7 +17,7 @@
                 "title": "EcoFlow credentials rejected",
                 "description": "EcoFlow no longer accepts the stored credentials for {name}. Enter the current ones to reconnect.",
                 "data": {
-                    "api_host": "API host",
+                    "api_host": "API region",
                     "access_key": "Access key",
                     "secret_key": "Secret key",
                     "username": "User email",
@@ -36,7 +36,7 @@
                     "finish": "Finish"
                 },
                 "data": {
-                    "api_host": "API host",
+                    "api_host": "API region",
                     "access_key": "Access key",
                     "secret_key": "Secret key",
                     "load_all_devices": "Automatic device loading"
@@ -45,7 +45,8 @@
             "choose_type": {
                 "menu_options": {
                     "api": "Use public API",
-                    "manual": "Use application API"
+                    "manual": "Use application API",
+                    "hybrid": "Use application API and public API (recommended)"
                 }
             },
             "select_device": {
@@ -64,10 +65,12 @@
                 "menu_options": {
                     "manual_add_device": "Add device",
                     "remove_device": "Remove device",
-                    "finish": "Finish"
+                    "finish": "Finish",
+                    "discover_devices": "Add devices found in the account",
+                    "open_api_keys": "Add public API keys"
                 },
                 "data": {
-                    "api_host": "API host",
+                    "api_host": "API region",
                     "username": "User email",
                     "password": "User password"
                 }
@@ -77,6 +80,35 @@
                     "device_type": "Device type",
                     "device_name": "Device name",
                     "device_id": "Device SN"
+                }
+            },
+            "hybrid": {
+                "title": "Application and public API",
+                "description": "The public API (developer keys) is used wherever it serves a device; the application API fills in the rest, such as each battery's own power and its role in a pack.",
+                "data": {
+                    "api_host": "Application API region",
+                    "username": "User email",
+                    "password": "User password",
+                    "open_api_host": "Public API region",
+                    "access_key": "Access key",
+                    "secret_key": "Secret key"
+                }
+            },
+            "open_api_keys": {
+                "title": "Public API keys",
+                "description": "With developer keys this entry also follows the public API: online status pushes and its documented commands.",
+                "data": {
+                    "open_api_host": "Public API region",
+                    "access_key": "Access key",
+                    "secret_key": "Secret key"
+                }
+            },
+            "discover_devices": {
+                "title": "Devices in the account",
+                "description": "Types come from the serial number. Linked STREAM batteries are grouped into a pack device automatically.",
+                "data": {
+                    "devices": "Devices to add",
+                    "auto_add_devices": "Add new devices of the account automatically"
                 }
             }
         }

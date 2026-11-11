@@ -17,7 +17,7 @@
                 "title": "Identifiants EcoFlow rejetés",
                 "description": "EcoFlow n'accepte plus les identifiants enregistrés pour {name}. Saisissez les identifiants actuels pour rétablir la connexion.",
                 "data": {
-                    "api_host": "Hôte API",
+                    "api_host": "Région de l'API",
                     "access_key": "Clé d'accès",
                     "secret_key": "Clé secrète",
                     "username": "E-mail de l'utilisateur",
@@ -36,7 +36,7 @@
                     "finish": "Terminer"
                 },
                 "data": {
-                    "api_host": "Hôte API",
+                    "api_host": "Région de l'API",
                     "access_key": "Clé d'accès",
                     "secret_key": "Clé secrète",
                     "load_all_devices": "Chargement automatique des appareils"
@@ -45,7 +45,8 @@
             "choose_type": {
                 "menu_options": {
                     "api": "Utiliser l'API publique",
-                    "manual": "Utiliser l'API de l'application"
+                    "manual": "Utiliser l'API de l'application",
+                    "hybrid": "API de l'application et API publique (recommandé)"
                 }
             },
             "select_device": {
@@ -64,10 +65,12 @@
                 "menu_options": {
                     "manual_add_device": "Ajouter un appareil",
                     "remove_device": "Supprimer un appareil",
-                    "finish": "Terminer"
+                    "finish": "Terminer",
+                    "discover_devices": "Ajouter les appareils du compte",
+                    "open_api_keys": "Ajouter les clés de l'API publique"
                 },
                 "data": {
-                    "api_host": "Hôte API",
+                    "api_host": "Région de l'API",
                     "username": "E-mail de l'utilisateur",
                     "password": "Mot de passe de l'utilisateur"
                 }
@@ -77,6 +80,35 @@
                     "device_type": "Type d'appareil",
                     "device_name": "Nom de l'appareil",
                     "device_id": "SN de l'appareil"
+                }
+            },
+            "hybrid": {
+                "title": "API de l'application et API publique",
+                "description": "L'API publique (clés développeur) est utilisée partout où elle sert un appareil ; l'API de l'application complète le reste, comme la puissance propre de chaque batterie et son rôle dans un pack.",
+                "data": {
+                    "api_host": "Région de l'API de l'application",
+                    "username": "E-mail du compte",
+                    "password": "Mot de passe du compte",
+                    "open_api_host": "Région de l'API publique",
+                    "access_key": "Clé d'accès",
+                    "secret_key": "Clé secrète"
+                }
+            },
+            "open_api_keys": {
+                "title": "Clés de l'API publique",
+                "description": "Avec des clés développeur, cette entrée suit aussi l'API publique : états en ligne poussés et commandes documentées.",
+                "data": {
+                    "open_api_host": "Région de l'API publique",
+                    "access_key": "Clé d'accès",
+                    "secret_key": "Clé secrète"
+                }
+            },
+            "discover_devices": {
+                "title": "Appareils du compte",
+                "description": "Le type vient du numéro de série. Les batteries STREAM liées sont regroupées automatiquement dans un appareil pack.",
+                "data": {
+                    "devices": "Appareils à ajouter",
+                    "auto_add_devices": "Ajouter automatiquement les nouveaux appareils du compte"
                 }
             }
         }

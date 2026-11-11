@@ -15,6 +15,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector
 from homeassistant.helpers.device_registry import DeviceRegistry
 from homeassistant.helpers.entity_registry import EntityRegistry
@@ -22,11 +23,13 @@ from homeassistant.helpers.entity_registry import EntityRegistry
 from custom_components.ecoflow_cloud import (
     CONF_ACCESS_KEY,
     CONF_API_HOST,
+    CONF_AUTO_ADD_DEVICES,
     CONF_DEVICE_ID,
     CONF_DEVICE_LIST,
     CONF_DEVICE_NAME,
     CONF_DEVICE_TYPE,
     CONF_GROUP,
+    CONF_OPEN_API_HOST,
     CONF_PARENT_SN,
     CONF_PASSWORD,
     CONF_SECRET_KEY,
@@ -36,6 +39,7 @@ from custom_components.ecoflow_cloud import (
     CONFIG_VERSION,
     DEFAULT_ASSUME_OFFLINE_SEC,
     DEFAULT_ENERGY_UPDATE_INTERVAL_SEC,
+    DEFAULT_OPEN_API_HOST,
     DEFAULT_REFRESH_PERIOD_SEC,
     DEFAULT_RESET_SENSORS_ON_OFFLINE,
     ECOFLOW_DOMAIN,
@@ -48,7 +52,10 @@ from custom_components.ecoflow_cloud import (
     OPTS_VERBOSE_STATUS_MODE,
     DeviceData,
     DeviceOptions,
+    default_device_options,
     extract_devices,
+    is_hybrid_entry,
+    is_public_entry,
 )
 
 from .api import EcoflowAuthException, EcoflowException
@@ -57,6 +64,23 @@ from .devices import EcoflowDeviceInfo
 _LOGGER = logging.getLogger(__name__)
 
 API_SELECT_DEVICE_SCHEMA = vol.Schema({vol.Required(CONF_SELECT_DEVICE_KEY): str})
+
+CONF_DISCOVERED: str = "devices"
+
+# Region -> host, shown with the host so the choice is explicit
+APP_API_HOSTS = {"api-e.ecoflow.com": "EU", "api.ecoflow.com": "US"}
+OPEN_API_HOSTS = {"api-e.ecoflow.com": "EU", "api-a.ecoflow.com": "US"}
+
+
+def _host_selector(hosts: dict[str, str]) -> selector.SelectSelector:
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[selector.SelectOptionDict(value=host, label=f"{region} - {host}") for host, region in hosts.items()],
+            mode=selector.SelectSelectorMode.DROPDOWN,
+            # an entry made before the selector may hold another host
+            custom_value=True,
+        )
+    )
 
 
 class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
@@ -71,6 +95,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
         self.cloud_device = None
         self.cloud_devices: dict[str, EcoflowDeviceInfo] = {}
         self.local_devices: dict[str, DeviceData] = {}
+        self.discovered: dict[str, EcoflowDeviceInfo] = {}
 
     def set_current_config_entry(self, config_entry: ConfigEntry) -> None:
         self.config_entry = config_entry
@@ -161,7 +186,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
         # Get the device registry
         device_reg: DeviceRegistry = dr.async_get(self.hass)
 
-        if CONF_ACCESS_KEY in self.config_entry.data:
+        if is_public_entry(self.config_entry.data):
             identifiers = {(ECOFLOW_DOMAIN, f"api-{sn}")}
         else:
             identifiers = {(ECOFLOW_DOMAIN, f"{sn}")}
@@ -194,7 +219,8 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
         existing_entry = await self.async_set_unique_id("group-" + self.new_data[CONF_GROUP], raise_on_progress=False)
 
         if existing_entry:
-            return self.async_abort(reason="do_reconfigure_existing")
+            # adding to a group that exists is reconfiguring it: carry on there instead of sending the user away
+            self.set_current_config_entry(existing_entry)
 
         return await self.async_step_choose_type()
 
@@ -207,7 +233,7 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
-        public_api = CONF_ACCESS_KEY in self.new_data
+        public_api = is_public_entry(self.new_data)
 
         # HA fills "name" from the entry title on newer cores; set it so older ones match
         placeholders = {"name": self.new_data.get(CONF_GROUP, "")}
@@ -253,18 +279,20 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
 
     async def async_step_choose_type(self, user_input: dict[str, Any] | None = None):
         if self.config_entry:  # reconfig flow
-            if CONF_ACCESS_KEY in self.config_entry.data:
+            if is_public_entry(self.config_entry.data):
                 return await self.async_step_api()
             else:
                 return await self.async_step_manual()
 
         if not user_input:
-            return self.async_show_menu(step_id="choose_type", menu_options=["api", "manual"])
+            return self.async_show_menu(step_id="choose_type", menu_options=["hybrid", "api", "manual"])
 
     def _manual_schema(self) -> vol.Schema:
         return vol.Schema(
             {
-                vol.Required(CONF_API_HOST, default=self.new_data.get(CONF_API_HOST, "api.ecoflow.com")): str,
+                vol.Required(
+                    CONF_API_HOST, default=self.new_data.get(CONF_API_HOST, "api.ecoflow.com")
+                ): _host_selector(APP_API_HOSTS),
                 vol.Required(CONF_USERNAME, default=self.new_data.get(CONF_USERNAME, "")): str,
                 vol.Required(CONF_PASSWORD, default=self.new_data.get(CONF_PASSWORD, "")): str,
             }
@@ -275,16 +303,156 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
             {
                 vol.Required(
                     CONF_API_HOST, default=self.new_data.get(CONF_API_HOST, "api-e.ecoflow.com")
-                ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=["api-e.ecoflow.com", "api-a.ecoflow.com"],
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    ),
-                ),
+                ): _host_selector(OPEN_API_HOSTS),
                 vol.Required(CONF_ACCESS_KEY, default=self.new_data.get(CONF_ACCESS_KEY, "")): str,
                 vol.Required(CONF_SECRET_KEY, default=self.new_data.get(CONF_SECRET_KEY, "")): str,
             }
         )
+
+    def _open_keys_fields(self) -> dict:
+        return {
+            vol.Required(
+                CONF_OPEN_API_HOST, default=self.new_data.get(CONF_OPEN_API_HOST, DEFAULT_OPEN_API_HOST)
+            ): _host_selector(OPEN_API_HOSTS),
+            vol.Required(CONF_ACCESS_KEY, default=self.new_data.get(CONF_ACCESS_KEY, "")): str,
+            vol.Required(CONF_SECRET_KEY, default=self.new_data.get(CONF_SECRET_KEY, "")): str,
+        }
+
+    def _hybrid_schema(self) -> vol.Schema:
+        return vol.Schema(
+            {
+                vol.Required(
+                    CONF_API_HOST, default=self.new_data.get(CONF_API_HOST, "api-e.ecoflow.com")
+                ): _host_selector(APP_API_HOSTS),
+                vol.Required(CONF_USERNAME, default=self.new_data.get(CONF_USERNAME, "")): str,
+                vol.Required(CONF_PASSWORD, default=self.new_data.get(CONF_PASSWORD, "")): str,
+                **self._open_keys_fields(),
+            }
+        )
+
+    def _set_open_keys(self, user_input: dict[str, Any]) -> None:
+        self.new_data[CONF_OPEN_API_HOST] = user_input.get(CONF_OPEN_API_HOST, DEFAULT_OPEN_API_HOST)
+        self.new_data[CONF_ACCESS_KEY] = user_input.get(CONF_ACCESS_KEY, "").strip()
+        self.new_data[CONF_SECRET_KEY] = user_input.get(CONF_SECRET_KEY, "").strip()
+
+    def _create_hybrid_client(self):
+        from .api.hybrid_api import EcoflowHybridApiClient
+
+        return EcoflowHybridApiClient(
+            self.new_data[CONF_API_HOST],
+            self.new_data[CONF_USERNAME],
+            self.new_data[CONF_PASSWORD],
+            self.new_data[CONF_GROUP],
+            self.new_data[CONF_OPEN_API_HOST],
+            self.new_data[CONF_ACCESS_KEY],
+            self.new_data[CONF_SECRET_KEY],
+        )
+
+    async def _login(self, client, open_keys: bool) -> dict[str, str]:
+        errors: dict[str, str] = {}
+        try:
+            await client.login()
+        except EcoflowAuthException as e:
+            # 8513 is the open API's answer to a bad key; the app API names its own errors
+            errors["base"] = "invalid_access_key" if open_keys and e.code == "8513" else str(e)
+        except EcoflowException as e:
+            errors["base"] = str(e)
+        return errors
+
+    async def async_step_hybrid(self, user_input: dict[str, Any] | None = None):
+        """App login and developer keys: the open API wherever it serves a device, the app API for the rest."""
+        if not user_input:
+            return self.async_show_form(step_id="hybrid", data_schema=self._hybrid_schema())
+
+        self._set_manual_credentials(user_input)
+        self._set_open_keys(user_input)
+        self.auth = self._create_hybrid_client()
+        try:
+            errors = await self._login(self.auth, open_keys=True)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unexpected exception in login action")
+            return self.async_abort(reason="unknown")
+        if errors:
+            return self.async_show_form(step_id="hybrid", data_schema=self._hybrid_schema(), errors=errors)
+        return await self.async_step_discover_devices()
+
+    async def async_step_open_api_keys(self, user_input: dict[str, Any] | None = None):
+        """Add developer keys to an app-API entry, which then follows the open API too."""
+        schema = vol.Schema(self._open_keys_fields())
+        if not user_input:
+            return self.async_show_form(step_id="open_api_keys", data_schema=schema)
+
+        self._set_open_keys(user_input)
+        from .api.public_api import EcoflowPublicApiClient
+
+        client = EcoflowPublicApiClient(
+            self.new_data[CONF_OPEN_API_HOST],
+            self.new_data[CONF_ACCESS_KEY],
+            self.new_data[CONF_SECRET_KEY],
+            self.new_data[CONF_GROUP],
+        )
+        try:
+            errors = await self._login(client, open_keys=True)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unexpected exception in login action")
+            return self.async_abort(reason="unknown")
+        if errors:
+            return self.async_show_form(step_id="open_api_keys", data_schema=schema, errors=errors)
+        return await self.update_or_create()
+
+    async def async_step_discover_devices(self, user_input: dict[str, Any] | None = None):
+        """Every device of the account, typed from its serial number, the supported ones preselected."""
+        from .devices.sn_prefixes import is_unsupported
+
+        if user_input is None:
+            try:
+                found = await self.auth.fetch_all_available_devices()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception in fetch device action")
+                return self.async_abort(reason="unknown")
+
+            configured = self.new_data.get(CONF_DEVICE_LIST, {})
+            self.discovered = {d.sn: d for d in found if not is_unsupported(d.sn)}
+            labels = {}
+            preselected = []
+            for sn, device in self.discovered.items():
+                known = device.device_type != "DIAGNOSTIC"
+                current = configured.get(sn, {}).get(CONF_DEVICE_TYPE)
+                note = "" if current is None else f", configured as {current}"
+                labels[sn] = f"{device.name} ({device.device_type if known else 'type unknown'}{note})"
+                if known and current != device.device_type:
+                    preselected.append(sn)
+            if not labels:
+                return self.async_abort(reason="no_device_to_add")
+
+            return self.async_show_form(
+                step_id="discover_devices",
+                data_schema=vol.Schema(
+                    {
+                        vol.Optional(CONF_DISCOVERED, default=preselected): cv.multi_select(labels),
+                        vol.Optional(
+                            CONF_AUTO_ADD_DEVICES, default=self.new_data.get(CONF_AUTO_ADD_DEVICES, True)
+                        ): bool,
+                    }
+                ),
+            )
+
+        if CONF_DEVICE_LIST not in self.new_data:
+            self.new_data[CONF_DEVICE_LIST] = {}
+            self.new_options[CONF_DEVICE_LIST] = {}
+        self.new_data[CONF_AUTO_ADD_DEVICES] = user_input.get(CONF_AUTO_ADD_DEVICES, True)
+        for sn in user_input.get(CONF_DISCOVERED, []):
+            device = self.discovered[sn]
+            existing = self.new_data[CONF_DEVICE_LIST].get(sn, {})
+            self.new_data[CONF_DEVICE_LIST][sn] = {
+                # keep a name the user gave; the type follows the serial
+                CONF_DEVICE_NAME: existing.get(CONF_DEVICE_NAME, device.name),
+                CONF_DEVICE_TYPE: device.device_type,
+            }
+            self.new_options[CONF_DEVICE_LIST].setdefault(sn, default_device_options(device.device_type))
+        if not self.new_data[CONF_DEVICE_LIST]:
+            return self.async_abort(reason="no_device_to_add")
+        return await self.update_or_create()
 
     def _schema_for(self, public_api: bool) -> vol.Schema:
         return self._api_schema() if public_api else self._manual_schema()
@@ -342,13 +510,22 @@ class EcoflowConfigFlow(ConfigFlow, domain=ECOFLOW_DOMAIN):
         if self.config_entry:  # reconfig flow
             devices = extract_devices(self.config_entry)
             self.set_local_device_list(list(devices.values()))
+            if is_hybrid_entry(self.new_data):
+                # validate with the stored keys too, so discovery reports open-API status
+                self.auth = self._create_hybrid_client()
+                try:
+                    await self.auth.login()
+                except Exception as e:  # pylint: disable=broad-except
+                    _LOGGER.warning("Open-API login failed, using the app API alone: %s", e)
+                    self.auth = self._create_manual_client()
+                    await self.auth.login()
 
-            return self.async_show_menu(
-                step_id="manual",
-                menu_options=["manual_add_device", "remove_device", "finish"],
-            )
+            options = ["discover_devices", "manual_add_device", "remove_device", "finish"]
+            if not is_hybrid_entry(self.new_data):
+                options.insert(2, "open_api_keys")
+            return self.async_show_menu(step_id="manual", menu_options=options)
         else:
-            return await self.async_step_manual_device_input()
+            return await self.async_step_discover_devices()
 
     async def async_step_manual_add_device(self, user_input: dict[str, Any] | None = None):
         return await self.async_step_manual_device_input()
