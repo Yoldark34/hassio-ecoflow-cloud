@@ -14,8 +14,6 @@
 - Battery Power (`batteryPower`)
 - Battery Power (magnitude) (`bpPower`)   _(disabled)_
 - Grid Port Power (`gridPortPower`)
-- Consumed Power (`gridPortPower`) (energy:  _[Device Name]_ Consumed Energy)
-- Returned Power (`gridPortPower`) (energy:  _[Device Name]_ Returned Energy)
 - Inverter Power (`unitInverterPower`)
 - House Output Power (`unitOnGridPower`)
 - Unit Backup Port Power (`unitBackupPower`)
@@ -38,8 +36,6 @@
 - Solar Power (`sysEnergyStreamReport.pvPwr`)
 - Inverter Output Power (`sysEnergyStreamReport.onGridPwr`)
 - Backup Port Power (`sysEnergyStreamReport.backupPwr`)   _(disabled)_
-- Consumed Power (`sysEnergyStreamReport.bpPwr`) (energy:  _[Device Name]_ Consumed Energy)
-- Returned Power (`sysEnergyStreamReport.bpPwr`) (energy:  _[Device Name]_ Returned Energy)
 - Power Grid Global (`meterTotalPower`)
 - Power Grid L1 (`meterPhaseAPower`)
 - Power Grid L2 (`meterPhaseBPower`)   _(disabled)_

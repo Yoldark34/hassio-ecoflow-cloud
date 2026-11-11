@@ -112,6 +112,9 @@ device, named after the app's system, with each battery under it:
   charging, <0 discharging), inverter and house output power, backup socket,
   remaining energy and times, AC socket, X-Boost, UPS, and its *Pack Role*
   (master, slave or election). Solar inputs exist only on the STREAM 5000
+- energy: each battery has the lifetime *Cumulative Energy Charge / Discharge*
+  its BMS counts, and the pack shows their sum (neither API sends AC-side energy
+  counters)
 - a pack setting goes to the master, or to any battery that is online, since
   every battery applies it to the whole pack
 
@@ -2348,7 +2351,7 @@ reported its role, the app's main unit is taken.
 
 </p></details>
 
-<details><summary> STREAM_AC_5000 <i>(sensors: 48, binary_sensors: 1, switches: 4, sliders: 5, selects: 1)</i> </summary>
+<details><summary> STREAM_AC_5000 <i>(sensors: 44, binary_sensors: 1, switches: 4, sliders: 5, selects: 1)</i> </summary>
 <p>
 
 *Sensors*
@@ -2365,8 +2368,6 @@ reported its role, the app's main unit is taken.
 - Battery Power
 - Battery Power (magnitude)  _(disabled)_
 - Grid Port Power
-- Consumed Power (energy:  _[Device Name]_ Consumed Energy)
-- Returned Power (energy:  _[Device Name]_ Returned Energy)
 - Inverter Power
 - House Output Power
 - Unit Backup Port Power
@@ -2389,8 +2390,6 @@ reported its role, the app's main unit is taken.
 - Solar Power
 - Inverter Output Power
 - Backup Port Power  _(disabled)_
-- Consumed Power (energy:  _[Device Name]_ Consumed Energy)
-- Returned Power (energy:  _[Device Name]_ Returned Energy)
 - Power Grid Global
 - Power Grid L1
 - Power Grid L2  _(disabled)_

@@ -216,28 +216,7 @@ def test_pack_counter_never_goes_down(pack, units):
     assert pack.data.params["accuChgEnergy"] == before
 
 
-async def test_consumed_and_returned_split_the_signed_power(hass, pack, units):
-    from custom_components.ecoflow_cloud.devices.internal.stream_ac_5000 import DirectionalWattsSensorEntity
-
-    units[ES22].configure(hass)
-    sensors = [e for e in units[ES22].sensors(fake_client()) if isinstance(e, DirectionalWattsSensorEntity)]
-    consumed, returned = sensors
-    for sensor in sensors:
-        sensor.schedule_update_ha_state = lambda *a, **k: None
-    consumed._updated({"gridPortPower": -420.0})
-    returned._updated({"gridPortPower": -420.0})
-    assert (consumed.native_value, returned.native_value) == (0.0, 420.0)
-    returned._updated({"gridPortPower": 300.0})
-    assert returned.native_value == 0.0
-    assert consumed.unique_id != returned.unique_id
-    energy = returned.energy_sensor()
-    assert energy.entity_registry_visible_default
-    assert energy.entity_category is None
-
-
-async def test_the_pack_has_consumed_and_returned_energy(hass, pack):
-    from custom_components.ecoflow_cloud.devices.internal.stream_ac_5000 import DirectionalWattsSensorEntity
-
+async def test_the_pack_counts_energy_with_its_units_counters(hass, pack):
     pack.configure(hass)
-    keys = {e.mqtt_key for e in pack.sensors(fake_client()) if isinstance(e, DirectionalWattsSensorEntity)}
-    assert keys == {"sysEnergyStreamReport.bpPwr"}
+    keys = {getattr(e, "mqtt_key", None) for e in pack.sensors(fake_client())}
+    assert {"accuChgEnergy", "accuDsgEnergy"} <= keys
