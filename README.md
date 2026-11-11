@@ -21,8 +21,9 @@ The quickest way to install this integration is via [HACS](https://github.com/ha
 
 [![Add to HACS via My Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Yoldark34&repository=hassio-ecoflow-cloud&category=Integration)
 
-1. Click above to install as a custom repository via HACS, and pick the
-   `stream-5000-hybrid` branch
+1. Click above to install as a custom repository via HACS. Releases of this
+   fork are tagged `vX.Y.Z-yoldark.N` and built from the `stream-5000-hybrid`
+   branch
 2. Restart Home Assistant
 3. Once restart is done, use `Add Integration` → `EcoflowCloud`.
 
