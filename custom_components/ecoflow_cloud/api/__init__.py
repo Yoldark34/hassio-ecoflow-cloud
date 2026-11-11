@@ -9,7 +9,7 @@ from attr import dataclass
 from homeassistant.components.diagnostics import async_redact_data
 
 from ..device_data import DeviceData
-from .message import JSONMessage, Message
+from .message import JSONMessage, Message, OpenAPICommand
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +40,33 @@ class EcoflowMqttInfo:
     client_id: str | None = None
 
 
+@dataclass
+class EcoflowSystem:
+    """A group of devices the app shows as one system, e.g. linked STREAM batteries."""
+
+    system_no: str
+    name: str
+    member_sns: list[str]
+    main_sn: str | None
+    online: dict[str, bool]
+
+    @staticmethod
+    def from_api(system: dict[str, Any]) -> EcoflowSystem | None:
+        system_no = system.get("systemNo")
+        if not system_no:
+            return None
+        children = system.get("childDeviceList") or []
+        members = list(system.get("mainSns") or [c["sn"] for c in children if "sn" in c])
+        main_sn = (system.get("systemProperty") or {}).get("systemMainSn")
+        return EcoflowSystem(
+            system_no=str(system_no),
+            name=system.get("systemName") or f"System {system_no}",
+            member_sns=members,
+            main_sn=main_sn,
+            online={c["sn"]: int(c.get("online", 0)) == 1 for c in children if "sn" in c},
+        )
+
+
 class EcoflowApiClient(ABC):
     def __init__(self):
         from custom_components.ecoflow_cloud.api.ecoflow_mqtt import EcoflowMQTTClient
@@ -55,6 +82,11 @@ class EcoflowApiClient(ABC):
     @abstractmethod
     async def login(self):
         pass
+
+    @property
+    def has_open_api(self) -> bool:
+        """True when set commands can go through the open-API broker (hybrid entries)."""
+        return False
 
     @abstractmethod
     async def fetch_all_available_devices(self):
@@ -149,7 +181,15 @@ class EcoflowApiClient(ABC):
             command = JSONMessage(command)
 
         self.devices[device_sn].data.update_to_target_state(mqtt_state)
-        self.mqtt_client.publish(self.devices[device_sn].device_info.set_topic, command.to_mqtt_payload())
+        # A command may name the unit that executes it, e.g. a pack setting sent to its master
+        target_sn = getattr(command, "target_sn", None) or device_sn
+        self._publish_set(self.devices.get(target_sn, self.devices[device_sn]), command)
+
+    def _publish_set(self, target: Any, command: Message) -> None:
+        if isinstance(command, OpenAPICommand):
+            _LOGGER.error("Open-API command for %s needs developer keys on this entry", target.device_info.sn)
+            return
+        self.mqtt_client.publish(target.device_info.set_topic, command.to_mqtt_payload())
 
     def start(self):
         _LOGGER.debug("Starting MQTT client for %s", self.mqtt_info.client_id)

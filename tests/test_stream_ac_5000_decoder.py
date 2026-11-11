@@ -70,3 +70,27 @@ def test_status_tracker_sees_the_unit_online():
     frame = next(f for f in FRAMES if f["api"] == "private" and f["device"] == SERIALS["ES22"])
     device.update_data(bytes.fromhex(frame["hex"]), device.device_info.data_topic)
     assert device.status_tracker.is_online
+
+
+def test_battery_power_is_signed_watts(es21, es22):
+    # block 44 field 2 is a zigzag sint32, so a discharging unit reads negative
+    assert es22["batteryPower"] < -400
+    assert es22["bpPower"] == abs(es22["batteryPower"])
+    assert abs(es21["batteryPower"]) < 50
+
+
+def test_roles_of_the_pack(es21, es22):
+    assert es21["systemRole"] == 1  # master
+    assert es22["systemRole"] == 2  # slave
+    assert es21["systemGroupId"] == es22["systemGroupId"]
+    assert es21["systemDevCnt"] == es22["systemDevCnt"] == 2
+
+
+def test_pack_values_use_the_open_api_names(es21, es22):
+    for params in (es21, es22):
+        assert params["bpBackupConfig.backupSocOnOff"] is False
+        assert params["bpBackupConfig.backupSoc"] == 10
+        assert 60 <= params["sysEnergyStreamReport.bpSoc"] <= 75
+        # the pack discharges into the house
+        assert params["sysEnergyStreamReport.bpPwr"] < -300
+        assert params["sysEnergyStreamReport.onGridPwr"] > 300

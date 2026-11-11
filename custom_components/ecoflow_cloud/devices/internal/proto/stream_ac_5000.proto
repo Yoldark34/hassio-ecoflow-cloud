@@ -16,8 +16,9 @@ syntax = "proto3";
 // Fields that could not be pinned to an observed quantity are omitted rather
 // than guessed; protobuf skips unknown fields, so this is lossless.
 //
-// Floats are watts. Some integer fields carry the same quantity in half-watts
-// and are named ...HalfW to keep the wire unit explicit.
+// Floats are watts. Signed integer powers are sint32 (zigzag): read as uint32
+// they look like unsigned half-watts, which is how blocks 38 and 44 were first
+// read. gridPortPowerHalfW in block 54 may be the same and is left unverified.
 
 // ---------------------------------------------------------------- cmd_id 2 --
 
@@ -68,7 +69,7 @@ message StreamAC5000SysConfig {
 message StreamAC5000Bms {
     optional uint32 soc = 1;
     optional uint32 cmsMaxChgSoc = 2;
-    optional uint32 bmsPowerHalfW = 3;      // battery-side power, magnitude
+    optional sint32 power = 3;              // W, signed like block 44
     optional uint32 cmsBattFullEnergy = 5;  // Wh
     optional uint32 bmsDsgRemTime = 7;      // minutes; 5939 == "unknown"
     optional uint32 bmsChgRemTime = 8;      // minutes; 5939 == "unknown"
@@ -81,12 +82,42 @@ message StreamAC5000BmsPack {
     optional StreamAC5000Bms bms = 1;
 }
 
-// Block 44 -- CMS view of the same pack.
+// Block 44 -- this unit's own battery (the app's SysBatteryInfoReport).
 message StreamAC5000Cms {
     optional uint32 soc = 1;
-    optional uint32 cmsPowerHalfW = 2;      // battery-side power, magnitude
+    // sint32 on the wire: zigzag makes -477 W read 953 as uint32, which once
+    // looked like an unsigned half-watt figure.
+    optional sint32 power = 2;              // W; >0 charging, <0 discharging
     optional uint32 cmsBattFullEnergy = 4;  // Wh
+    optional uint32 remainCap = 5;          // Wh left in this unit
+    optional uint32 dsgRemainTime = 6;      // minutes
     optional uint32 remainTime = 7;         // minutes for the CURRENT direction
+}
+
+// Block 11 -- the whole system's energy flow. Every unit of a pack sends the
+// same figures, and the open API publishes them as sysEnergyStreamReport.
+message StreamAC5000EnergyStream {
+    optional sint32 loadPwr = 1;    // W, house load
+    optional sint32 gridPwr = 2;    // W, from the grid (<0 = export)
+    optional sint32 pvPwr = 3;      // W
+    optional sint32 bpPwr = 4;      // W, batteries (>0 charging)
+    optional uint32 bpSoc = 5;      // %, system
+    optional sint32 onGridPwr = 6;  // W, inverters to the house
+    optional sint32 backupPwr = 7;  // W
+}
+
+// Block 27 -- pack membership. Role: 0 election, 1 master, 2 slave.
+message StreamAC5000SystemConfig {
+    optional uint32 systemGroupId = 1;
+    optional uint32 distributedDeviceRole = 2;
+    optional uint32 seriesDeviceId = 3;
+    optional uint32 systemDevCnt = 4;
+}
+
+// Block 30 -- backup reserve, applies to the whole pack.
+message StreamAC5000BackupConfig {
+    optional bool backupSocOnOff = 1;
+    optional uint32 backupSoc = 2;
 }
 
 // Block 50.1 -- per-serial power.
@@ -126,6 +157,9 @@ message StreamAC5000Runtime {
     optional StreamAC5000Cms cms = 44;
     optional StreamAC5000PowerPack powerPack = 50;
     optional StreamAC5000StatPack statPack = 54;
+    optional StreamAC5000EnergyStream sysEnergyStreamReport = 11;
+    optional StreamAC5000SystemConfig systemConfig = 27;
+    optional StreamAC5000BackupConfig bpBackupConfig = 30;
 }
 
 // --------------------------------------------------------------- cmd_id 50 --
@@ -163,6 +197,7 @@ message StreamAC5000SetSocLimits {
 message StreamAC5000SetPowerLimits {
     optional uint32 feedGridModePowLimit = 1;  // "net power out" W
     optional uint32 chgPowLimit = 2;           // "net power in" W
+    optional bool feedToGridLimitOnOff = 3;    // feed-in limit enforced
     optional uint32 outLimitField4 = 4;        // constant 4 alongside field 1
     optional uint32 outLimitMax = 5;           // constant 800 alongside field 1
 }
@@ -186,6 +221,7 @@ message StreamAC5000SetCommand {
     optional StreamAC5000SetDeviceCfg deviceCfg = 23;
     optional uint32 workMode = 25;  // 0 self-powered, 1 intelligent, 2 scheduled
     optional StreamAC5000SetSocLimits socLimits = 29;
+    optional StreamAC5000BackupConfig bpBackupConfig = 30;
 }
 
 // Envelope for outgoing commands. Declared here rather than reusing

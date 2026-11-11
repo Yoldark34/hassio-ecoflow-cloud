@@ -43,3 +43,22 @@ class JSONMessage(Message):
     @override
     def to_mqtt_payload(self) -> PayloadType:
         return json.dumps(JSONMessage.prepare_payload(self.data))
+
+
+class OpenAPICommand(Message):
+    """A set command for the open-API broker, sent by an app-API entry that also holds developer keys.
+
+    ``target_sn`` names the unit that receives it, which may differ from the entity's device (a pack).
+    """
+
+    def __init__(self, target_sn: str, envelope: JSONDict, params: JSONDict) -> None:
+        super().__init__()
+        self.target_sn = target_sn
+        self.envelope = envelope
+        self.params = params
+
+    @override
+    def to_mqtt_payload(self) -> PayloadType:
+        return json.dumps(
+            {**self.envelope, "params": self.params, "id": Message.gen_seq(), "version": "1.0", "sn": self.target_sn}
+        )

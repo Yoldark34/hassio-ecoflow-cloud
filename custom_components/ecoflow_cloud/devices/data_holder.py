@@ -51,6 +51,8 @@ class EcoflowDataHolder:
         self.module_sn = module_sn
 
         self.params = dict[str, Any]()
+        # Called with each batch of new params, e.g. so a pack hears what its units report
+        self._params_listeners: list[Callable[[dict[str, Any]], None]] = []
 
         self.__collect_raw = collect_raw
         self.set_params = BoundFifoList[dict[str, Any]]()
@@ -112,10 +114,15 @@ class EcoflowDataHolder:
 
         self.__accept_prepared_data(data, self.__update_params)
 
+    def add_params_listener(self, listener: Callable[[dict[str, Any]], None]) -> None:
+        self._params_listeners.append(listener)
+
     def __update_params(self, params: dict[str, Any]):
         if "params" in params:
             self.params.update(params["params"])
             self.set_params_time = dt.utcnow()
+            for listener in self._params_listeners:
+                listener(params["params"])
 
     def __accept_prepared_data(self, data: PreparedData, raw_data_acceptor: Callable[[dict[str, Any]], None]):
         if data.online is not None:

@@ -49,6 +49,7 @@ def make_device(cls: type[BaseDevice], sn: str, device_type: str, **opts: Any) -
 
 def fake_client() -> MagicMock:
     client = MagicMock()
+    client.has_open_api = False
     client.mqtt_client.is_connected.return_value = True
     client.schedule_mqtt_reconnect.return_value = None
     return client
@@ -62,3 +63,14 @@ def detach(entity: Any) -> Any:
     """Let an entity update its state without being added to hass."""
     entity.schedule_update_ha_state = lambda *args, **kwargs: None
     return entity
+
+
+def replay(devices: dict[str, BaseDevice], frames: list[dict[str, Any]], api: str = "private") -> None:
+    """Feed recorded frames to the device whose serial they carry, in capture order."""
+    for frame in frames:
+        device = devices.get(frame["device"])
+        if device is None or frame["api"] != api:
+            continue
+        topic = device.device_info.data_topic if api == "private" else device.device_info.open_data_topic
+        assert topic, f"{frame['device']} has no {api} data topic"
+        device.update_data(bytes.fromhex(frame["hex"]), topic)

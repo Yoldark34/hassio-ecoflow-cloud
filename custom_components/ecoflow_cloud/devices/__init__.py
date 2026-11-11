@@ -40,6 +40,12 @@ class EcoflowDeviceInfo:
 
     quota_all: str = "/iot-open/sign/device/quota/all"
 
+    # Open-API topics of a device that an app-API entry also follows (hybrid entries)
+    open_data_topic: str | None = None
+    open_status_topic: str | None = None
+    open_set_topic: str | None = None
+    open_set_reply_topic: str | None = None
+
     def topics(self) -> list[str]:
         topics: list[str | None] = [
             self.data_topic,
@@ -48,8 +54,12 @@ class EcoflowDeviceInfo:
             self.set_topic,
             self.set_reply_topic,
             self.status_topic,
+            self.open_data_topic,
+            self.open_status_topic,
+            self.open_set_topic,
+            self.open_set_reply_topic,
         ]
-        return [t for t in topics if t is not None]
+        return [t for t in topics if t]
 
 
 class NoQuotaMessageError(Exception):
@@ -139,9 +149,36 @@ class BaseDevice(ABC):
         elif data_type == self.device_info.status_topic:
             data = self._prepare_data_status_topic(raw_data)
             self.data.add_status(data)
+        elif data_type == self.device_info.open_data_topic:
+            self.data.add_data(self._prepare_open_data(raw_data))
+        elif data_type == self.device_info.open_status_topic:
+            self.data.add_status(self._prepare_open_status(raw_data))
+        elif data_type == self.device_info.open_set_reply_topic:
+            self.data.add_set_reply_message(PreparedData(None, None, self._open_json(raw_data)))
+        elif data_type == self.device_info.open_set_topic:
+            self.data.add_set_message(PreparedData(None, None, self._open_json(raw_data)))
         else:
             return False
         return True
+
+    def _open_json(self, raw_data: bytes) -> dict[str, Any]:
+        # The open API always speaks JSON, even for devices whose app API is protobuf
+        return BaseDevice._prepare_data(self, raw_data)
+
+    def _prepare_open_data(self, raw_data: bytes) -> PreparedData:
+        """An open-API quota push, for a device an app-API entry also follows."""
+        quota = self._open_json(raw_data)
+        params = self.open_quota_params(quota.get("params", quota))
+        return PreparedData(None, {"params": params} if params else None, quota)
+
+    def _prepare_open_status(self, raw_data: bytes) -> PreparedData:
+        data = self._open_json(raw_data)
+        status = data.get("params", {}).get("status") if isinstance(data.get("params"), dict) else None
+        return PreparedData(None if status is None else int(status) == 1, None, data)
+
+    def open_quota_params(self, quota: dict[str, Any]) -> dict[str, Any]:
+        """Map an open-API quota (pushed nested, or flattened with '-' over HTTP) onto this device's keys."""
+        return {}
 
     def _prepare_data_data_topic(self, raw_data: bytes) -> PreparedData:
         data = self._prepare_data(raw_data)
