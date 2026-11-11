@@ -33,7 +33,7 @@ from custom_components.ecoflow_cloud.devices.internal.stream_ac_5000 import (
     StreamSystemControls,
 )
 from custom_components.ecoflow_cloud.devices.status_tracker import OnlineStatus, StatusTracker
-from custom_components.ecoflow_cloud.sensor import MiscSensorEntity, StatusSensorEntity
+from custom_components.ecoflow_cloud.sensor import EnergySensorEntity, MiscSensorEntity, StatusSensorEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +61,9 @@ _PACK_KEYS = frozenset(
         "meterFreq",
     }
 )
+# Lifetime counters each unit keeps for its own battery; the pack shows their sum
+_SUMMED_COUNTERS = ("accuChgEnergy", "accuDsgEnergy")
+
 _PACK_PREFIXES = ("sysEnergyStreamReport.", "bpBackupConfig.", "powerParameterConfig.")
 
 _MASTER = 1
@@ -100,6 +103,7 @@ class StreamPack(BaseDevice):
         super().__init__(device_info, device_data)
         self.system = system
         self.members: list[StreamAC5000] = []
+        self._counter_totals: dict[str, int] = {}
         self.status_tracker = PackStatusTracker(self, device_data.options.assume_offline_sec)
         self.data = EcoflowDataHolder(None, device_data.options.diagnostic_mode, status_callback=self.status_tracker)
 
@@ -155,6 +159,9 @@ class StreamPack(BaseDevice):
             shared[KEY_METER_LINK] = int(any(m.data.params.get(KEY_METER_LINK) == 1 for m in self.members))
         if KEY_SYSTEM_ROLE in params:
             shared[KEY_MASTER_SN] = self.master_sn()
+        for key in _SUMMED_COUNTERS:
+            if key in params and (total := self._counter_total(key)) is not None:
+                shared[key] = total
         if shared:
             self.data.add_data(PreparedData(None, {"params": shared}, None))
 
@@ -170,6 +177,21 @@ class StreamPack(BaseDevice):
             if member is not None:
                 # relayed, so it says nothing about whether that unit itself is reachable
                 member.data.add_data(PreparedData(None, {"params": values}, None, is_auto=False))
+
+    def _counter_total(self, key: str) -> int | None:
+        """A lifetime counter of the whole pack: the sum of its units' own.
+
+        Only once every unit has reported it, and never lower than before: a total that drops
+        would read as a counter reset in Home Assistant's statistics.
+        """
+        values = [m.data.params.get(key) for m in self.members]
+        if any(value is None for value in values):
+            return None
+        total = int(sum(value for value in values if value is not None))
+        if total < self._counter_totals.get(key, 0):
+            return None
+        self._counter_totals[key] = total
+        return total
 
     def master_sn(self) -> str | None:
         for member in self.members:
@@ -209,6 +231,9 @@ class StreamPack(BaseDevice):
             PackStatusSensorEntity(client, self),
             MasterSensorEntity(client, self, KEY_MASTER_SN, const.STREAM_PACK_MASTER),
             MiscSensorEntity(client, self, KEY_SYSTEM_UNITS, const.STREAM_PACK_UNITS, False),
+            # battery side, as the units' BMS count it: conversion losses included
+            EnergySensorEntity(client, self, "accuChgEnergy", const.ACCU_CHARGE_ENERGY),
+            EnergySensorEntity(client, self, "accuDsgEnergy", const.ACCU_DISCHARGE_ENERGY),
             *self._controls(client).sensors(),
         ]
 

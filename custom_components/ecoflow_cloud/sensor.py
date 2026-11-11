@@ -477,10 +477,13 @@ class WattsSensorEntity(BaseSensorEntity):
         )
         self._energy_enabled = False
         self._energy_enabled_default = True
+        self._energy_visible = False
 
-    def with_energy(self, enabled_default: bool = True):
+    def with_energy(self, enabled_default: bool = True, visible: bool = False):
+        """Also integrate this power into an energy sensor; ``visible`` shows it outside diagnostics."""
         self._energy_enabled = True
         self._energy_enabled_default = enabled_default
+        self._energy_visible = visible
         return self
 
     def energy_enabled(self):
@@ -489,7 +492,7 @@ class WattsSensorEntity(BaseSensorEntity):
     def energy_sensor(self):
         if not self._energy_enabled:
             return None
-        return IntegralEnergySensorEntity(self, self._energy_enabled_default)
+        return IntegralEnergySensorEntity(self, self._energy_enabled_default, self._energy_visible)
 
 
 class EnergySensorEntity(BaseSensorEntity):
@@ -865,7 +868,7 @@ class IntegralEnergySensorEntity(IntegrationSensor):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_registry_visible_default = False
 
-    def __init__(self, base: WattsSensorEntity, enabled_default: bool = True):
+    def __init__(self, base: WattsSensorEntity, enabled_default: bool = True, visible: bool = False):
         version_kwargs: dict[str, Any] = {}
         if _INTEGRATION_SENSOR_TAKES_HASS:
             version_kwargs["hass"] = base.coordinator.hass
@@ -885,6 +888,10 @@ class IntegralEnergySensorEntity(IntegrationSensor):
         self.device_info = base.device_info
         self._base = base
         self._attr_entity_registry_enabled_default = enabled_default and base.enabled_default
+        if visible:
+            # meant for the Energy dashboard rather than diagnostics
+            self._attr_entity_registry_visible_default = True
+            self._attr_entity_category = None  # type: ignore[assignment]
         # Optional per-device throttle (seconds; 0 = off). The integral still advances on every source
         # update; only the reported total is held back, so the recorder stores at most one row per
         # interval instead of one per MQTT frame. Energy is never dropped: each reported value is the

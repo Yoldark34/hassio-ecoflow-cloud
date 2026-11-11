@@ -2348,7 +2348,7 @@ reported its role, the app's main unit is taken.
 
 </p></details>
 
-<details><summary> STREAM_AC_5000 <i>(sensors: 44, binary_sensors: 1, switches: 4, sliders: 5, selects: 1)</i> </summary>
+<details><summary> STREAM_AC_5000 <i>(sensors: 48, binary_sensors: 1, switches: 4, sliders: 5, selects: 1)</i> </summary>
 <p>
 
 *Sensors*
@@ -2365,6 +2365,8 @@ reported its role, the app's main unit is taken.
 - Battery Power
 - Battery Power (magnitude)  _(disabled)_
 - Grid Port Power
+- Consumed Power (energy:  _[Device Name]_ Consumed Energy)
+- Returned Power (energy:  _[Device Name]_ Returned Energy)
 - Inverter Power
 - House Output Power
 - Unit Backup Port Power
@@ -2387,6 +2389,8 @@ reported its role, the app's main unit is taken.
 - Solar Power
 - Inverter Output Power
 - Backup Port Power  _(disabled)_
+- Consumed Power (energy:  _[Device Name]_ Consumed Energy)
+- Returned Power (energy:  _[Device Name]_ Returned Energy)
 - Power Grid Global
 - Power Grid L1
 - Power Grid L2  _(disabled)_

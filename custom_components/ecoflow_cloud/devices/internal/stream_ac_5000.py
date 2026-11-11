@@ -130,6 +130,29 @@ SYS_ENERGY_FIELDS = ("loadPwr", "gridPwr", "pvPwr", "bpPwr", "bpSoc", "onGridPwr
 WORK_MODES = {"SELF_CONSUMPTION": 0, "AI_MODE": 1, "TIMER_TASK": 2, "POU_MODE": 3, "EMERGENCY_STOP": 4}
 
 
+class DirectionalWattsSensorEntity(WattsSensorEntity):
+    """One direction of a signed power, as a positive figure: what a battery takes in from the
+    house (consumed, power > 0) or gives back to it (returned, power < 0). Its energy integral
+    gives the battery's consumed / returned energy for the Energy dashboard."""
+
+    def __init__(self, client, device, mqtt_key: str, title: str, direction: int, enabled: bool = True):
+        super().__init__(client, device, mqtt_key, title, enabled)
+        self._direction = direction
+        # the signed power keeps the plain key, so each direction gets its own id
+        self._attr_unique_id = f"{self._attr_unique_id}-{'consumed' if direction > 0 else 'returned'}"
+
+    def _update_value(self, val: Any) -> bool:
+        return super()._update_value(max(self._direction * float(val), 0.0))
+
+
+def consumed_returned(client: EcoflowApiClient, device: BaseDevice, key: str) -> list[SensorEntity]:
+    """Consumed / returned power of a signed battery power (>0 charging), with their energy."""
+    return [
+        DirectionalWattsSensorEntity(client, device, key, const.STREAM_CONSUMED_POWER, 1).with_energy(visible=True),
+        DirectionalWattsSensorEntity(client, device, key, const.STREAM_RETURNED_POWER, -1).with_energy(visible=True),
+    ]
+
+
 class RoleSensorEntity(MiscSensorEntity):
     """A unit's role in its pack, as the units elect it among themselves."""
 
@@ -310,6 +333,7 @@ class StreamSystemControls:
             WattsSensorEntity(c, d, "sysEnergyStreamReport.pvPwr", const.STREAM_AC5000_SYS_PV_POWER),
             WattsSensorEntity(c, d, "sysEnergyStreamReport.onGridPwr", const.STREAM_AC5000_SYS_INVERTER_POWER),
             WattsSensorEntity(c, d, "sysEnergyStreamReport.backupPwr", const.STREAM_AC5000_SYS_BACKUP_POWER, False),
+            *consumed_returned(c, d, "sysEnergyStreamReport.bpPwr"),
             WattsSensorEntity(c, d, "meterTotalPower", const.SMART_METER_POWER_GLOBAL),
             WattsSensorEntity(c, d, "meterPhaseAPower", const.SMART_METER_POWER_L1),
             # single-phase homes never get L2/L3 (zero is left off the wire): opt in for three-phase
@@ -429,6 +453,8 @@ class StreamAC5000(BaseInternalDevice):
             WattsSensorEntity(client, self, KEY_BATTERY_POWER, const.STREAM_AC5000_BATTERY_POWER),
             WattsSensorEntity(client, self, "bpPower", const.STREAM_AC5000_BATTERY_POWER_MAGNITUDE, False),
             WattsSensorEntity(client, self, "gridPortPower", const.STREAM_AC5000_GRID_PORT_POWER),
+            # AC side, from this unit's entry of the master's list (>0 charging)
+            *consumed_returned(client, self, "gridPortPower"),
             WattsSensorEntity(client, self, "unitInverterPower", const.STREAM_AC5000_UNIT_INVERTER_POWER),
             WattsSensorEntity(client, self, "unitOnGridPower", const.STREAM_AC5000_UNIT_ON_GRID_POWER),
             WattsSensorEntity(client, self, "unitBackupPower", const.STREAM_AC5000_UNIT_BACKUP_POWER),

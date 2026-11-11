@@ -203,3 +203,41 @@ def test_roles_start_from_the_app_main_unit(units):
     units[ES21].data.add_data(PreparedData(None, {"params": {"systemRole": 2}}, None))
     assert pack.master_sn() == ES22
     assert pack.data.params["masterSn"] == ES22
+
+
+def test_pack_counters_sum_the_units_own(pack, units):
+    for key in ("accuChgEnergy", "accuDsgEnergy"):
+        assert pack.data.params[key] == sum(u.data.params[key] for u in units.values())
+
+
+def test_pack_counter_never_goes_down(pack, units):
+    before = pack.data.params["accuChgEnergy"]
+    units[ES22].data.add_data(PreparedData(None, {"params": {"accuChgEnergy": 1}}, None))
+    assert pack.data.params["accuChgEnergy"] == before
+
+
+async def test_consumed_and_returned_split_the_signed_power(hass, pack, units):
+    from custom_components.ecoflow_cloud.devices.internal.stream_ac_5000 import DirectionalWattsSensorEntity
+
+    units[ES22].configure(hass)
+    sensors = [e for e in units[ES22].sensors(fake_client()) if isinstance(e, DirectionalWattsSensorEntity)]
+    consumed, returned = sensors
+    for sensor in sensors:
+        sensor.schedule_update_ha_state = lambda *a, **k: None
+    consumed._updated({"gridPortPower": -420.0})
+    returned._updated({"gridPortPower": -420.0})
+    assert (consumed.native_value, returned.native_value) == (0.0, 420.0)
+    returned._updated({"gridPortPower": 300.0})
+    assert returned.native_value == 0.0
+    assert consumed.unique_id != returned.unique_id
+    energy = returned.energy_sensor()
+    assert energy.entity_registry_visible_default
+    assert energy.entity_category is None
+
+
+async def test_the_pack_has_consumed_and_returned_energy(hass, pack):
+    from custom_components.ecoflow_cloud.devices.internal.stream_ac_5000 import DirectionalWattsSensorEntity
+
+    pack.configure(hass)
+    keys = {e.mqtt_key for e in pack.sensors(fake_client()) if isinstance(e, DirectionalWattsSensorEntity)}
+    assert keys == {"sysEnergyStreamReport.bpPwr"}
