@@ -9,7 +9,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.util import uuid
 
 from ..devices import EcoflowDeviceInfo
-from . import API_RESPONSE_TO_REDACT, EcoflowApiClient, EcoflowAuthException, EcoflowException
+from . import API_RESPONSE_TO_REDACT, EcoflowApiClient, EcoflowAuthException, EcoflowException, EcoflowSystem
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,8 +76,37 @@ class EcoflowPrivateApiClient(EcoflowApiClient):
         res = base + "_" + pub + "_" + str(millis) + "_" + hashlib.md5(k.encode("utf-8")).hexdigest()
         return res
 
-    async def fetch_all_available_devices(self):
-        return []
+    async def fetch_all_available_devices(self) -> list[EcoflowDeviceInfo]:
+        """Devices bound to the account, with their online flag, as the app lists them."""
+        from ..devices.sn_prefixes import device_type_for
+
+        response = await self.__call_api("/iot-devices/user/device")
+        data = response.get("data") or {}
+        # devices shared with this account are as usable as its own
+        listed = {**(data.get("share") or {}), **(data.get("bound") or {})}
+        result = []
+        for sn, device in listed.items():
+            device_type = device_type_for(sn) or "DIAGNOSTIC"
+            name = device.get("deviceName") or f"{device_type}-{sn}"
+            result.append(self._create_device_info(sn, name, device_type, int(device.get("online", -1))))
+        return result
+
+    async def fetch_systems(self, sns: list[str]) -> list[EcoflowSystem]:
+        """The systems (packs) the app groups the given devices into, with their master unit."""
+        systems: dict[str, EcoflowSystem] = {}
+        spaces: set[str] = set()
+        for sn in sns:
+            info = await self.__call_api("/app/space/getSpaceInfoBySn", {"sn": sn})
+            space_id = (info.get("data") or {}).get("spaceId")
+            if not space_id or space_id in spaces:
+                continue
+            spaces.add(space_id)
+            listing = await self.__call_api("/app/space/v3/all/device/list", {"spaceId": space_id})
+            for system in (listing.get("data") or {}).get("systemList") or []:
+                parsed = EcoflowSystem.from_api(system)
+                if parsed is not None:
+                    systems[parsed.system_no] = parsed
+        return list(systems.values())
 
     async def quota_all(self, device_sn: str | None):
         if not device_sn:

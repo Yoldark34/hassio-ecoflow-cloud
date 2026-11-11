@@ -1,10 +1,10 @@
-"""Global coordinator that polls device online statuses via the public API.
+"""Global coordinator that polls device online statuses from the account's device list.
 
 A single instance is created per hass instance. API clients register/unregister
 as config entries load/unload. On each poll cycle it:
 1. Collects all devices from all registered clients.
 2. Checks whether any device's StatusTracker is in the ASSUME_OFFLINE state.
-3. If so, calls /device/list via a public API client and distributes statuses by SN.
+3. If so, asks each client for its device list (open or app API) and distributes statuses by SN.
 """
 
 from __future__ import annotations
@@ -64,14 +64,14 @@ class DeviceStatusCoordinator(DataUpdateCoordinator[None]):
                 all_devices.setdefault(sn, []).append(device)
         return all_devices
 
-    def _public_clients(self) -> list[EcoflowApiClient]:
-        from ..api.public_api import EcoflowPublicApiClient
-
-        return [c for c in self._clients.values() if isinstance(c, EcoflowPublicApiClient)]
+    def _listing_clients(self) -> list[EcoflowApiClient]:
+        # every client lists its account's devices with an online flag: the open API with
+        # /device/list, the app API with /iot-devices/user/device
+        return list(self._clients.values())
 
     async def _async_update_data(self) -> None:
-        public_clients = self._public_clients()
-        if not public_clients:
+        listing_clients = self._listing_clients()
+        if not listing_clients:
             return
 
         all_devices = self._collect_all_devices()
@@ -89,7 +89,7 @@ class DeviceStatusCoordinator(DataUpdateCoordinator[None]):
             return
 
         # Fetch from each public API client (each covers its own account)
-        for client in public_clients:
+        for client in listing_clients:
             try:
                 api_devices = await client.fetch_all_available_devices()
             except Exception as err:

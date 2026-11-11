@@ -21,7 +21,9 @@ AUTH_FAILURE_REASONS = frozenset({"Bad user name or password", "Not authorized",
 
 
 class EcoflowMQTTClient:
-    def __init__(self, mqtt_info: EcoflowMqttInfo, devices: dict[str, BaseDevice]):
+    def __init__(self, mqtt_info: EcoflowMqttInfo, devices: dict[str, BaseDevice], topic_prefix: str | None = None):
+        # A hybrid entry runs one client per broker; each one follows only its own topics
+        self.__topic_prefix = topic_prefix
         self.connected = False
         self.auth_failed = False
         self.on_auth_failure: Callable[[], None] | None = None
@@ -149,6 +151,7 @@ class EcoflowMQTTClient:
         topics = []
         for device in self.__devices.values():
             for topic in device.device_info.topics():
-                topics.append(topic)
+                if self.__topic_prefix is None or topic.startswith(self.__topic_prefix):
+                    topics.append(topic)
         # Remove duplicates that can occur when multiple devices have the same topic (for example sub devices)
         return list(set(topics))

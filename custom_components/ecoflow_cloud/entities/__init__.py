@@ -35,13 +35,18 @@ class EcoFlowAbstractEntity(Entity):
         name = self._device.device_data.name
         if self._device.device_data.display_name:
             name = self._device.device_data.display_name
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(ECOFLOW_DOMAIN, f"{self._type_prefix()}{self._device.device_data.sn}")},
             manufacturer="EcoFlow",
             name=name,
             model=self._device.device_data.device_type,
             serial_number=self._device.device_data.sn,
         )
+        pack = getattr(self._device, "pack", None)
+        if pack is not None:
+            # units of a pack show under it, like the app's system view
+            info["via_device"] = (ECOFLOW_DOMAIN, f"{self._type_prefix()}{pack.device_data.sn}")
+        return info
 
     def _type_prefix(self):
         return "api-" if self._device.device_info.public_api else ""

@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Mapping
 from typing import Any, Final
 
 import aiohttp
@@ -49,11 +50,16 @@ CONF_USERNAME: Final = "username"
 CONF_PASSWORD: Final = "password"
 
 CONF_API_HOST: Final = "api_host"
+# Open-API host of a hybrid entry (app login plus developer keys); api_host stays the app API's
+CONF_OPEN_API_HOST: Final = "open_api_host"
+DEFAULT_OPEN_API_HOST: Final = "api-e.ecoflow.com"
 CONF_ACCESS_KEY: Final = "access_key"
 CONF_SECRET_KEY: Final = "secret_key"
 CONF_GROUP: Final = "group"
 CONF_TO_REDACT: Final = {CONF_USERNAME, CONF_PASSWORD, CONF_ACCESS_KEY, CONF_SECRET_KEY}
 CONF_DEVICE_LIST: Final = "devices_list"
+# Add the account's devices of a known type at each start, so a new device needs no reconfiguration
+CONF_AUTO_ADD_DEVICES: Final = "auto_add_devices"
 CONF_ENTRY_ID: Final = "entry_id"
 
 CONF_SELECT_DEVICE_KEY: Final = "select_device"
@@ -216,6 +222,15 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     return updated
 
 
+def is_hybrid_entry(data: Mapping[str, Any]) -> bool:
+    return CONF_USERNAME in data and CONF_ACCESS_KEY in data
+
+
+def is_public_entry(data: Mapping[str, Any]) -> bool:
+    """Open-API only. Hybrid entries keep the app API's device identifiers, so they are not."""
+    return CONF_ACCESS_KEY in data and CONF_USERNAME not in data
+
+
 def extract_devices(entry: ConfigEntry) -> dict[str, DeviceData]:
     result = dict[str, DeviceData]()
     for sn, data in entry.data[CONF_DEVICE_LIST].items():
@@ -256,7 +271,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     api_client: EcoflowApiClient
     if ECOFLOW_DOMAIN not in hass.data:
         hass.data[ECOFLOW_DOMAIN] = {}
-    if CONF_USERNAME in entry.data and CONF_PASSWORD in entry.data:
+    if is_hybrid_entry(entry.data):
+        from .api.hybrid_api import EcoflowHybridApiClient
+
+        api_client = EcoflowHybridApiClient(
+            entry.data[CONF_API_HOST],
+            entry.data[CONF_USERNAME],
+            entry.data[CONF_PASSWORD],
+            entry.data[CONF_GROUP],
+            entry.data.get(CONF_OPEN_API_HOST, DEFAULT_OPEN_API_HOST),
+            entry.data[CONF_ACCESS_KEY],
+            entry.data[CONF_SECRET_KEY],
+        )
+    elif CONF_USERNAME in entry.data and CONF_PASSWORD in entry.data:
         from .api.private_api import EcoflowPrivateApiClient
 
         api_client = EcoflowPrivateApiClient(
@@ -303,9 +330,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         _LOGGER.warning("Failed to fetch device statuses: %s", ex)
         api_devices_map = None
 
+    if entry.data.get(CONF_AUTO_ADD_DEVICES) and api_devices_map:
+        devices_list.update(_add_new_account_devices(hass, entry, api_devices_map.values()))
+
     for device_data in devices_list.values():
         device = api_client.configure_device(device_data, api_devices_map)
         device.configure(hass)
+
+    for pack in await _discover_packs(api_client):
+        api_client.add_device(pack)
+        pack.configure(hass)
 
     def request_reauth() -> None:
         # called from the paho thread once EcoFlow rejects the MQTT credentials
@@ -338,6 +372,63 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     entry.async_on_unload(entry.add_update_listener(update_listener))
 
     return True
+
+
+def default_device_options(device_type: str) -> dict[str, Any]:
+    from .devices.registry import devices
+
+    device_class = devices.get(device_type, devices["DIAGNOSTIC"])
+    return {
+        OPTS_REFRESH_PERIOD_SEC: DEFAULT_REFRESH_PERIOD_SEC,
+        OPTS_POWER_STEP: device_class.default_charging_power_step(),
+        OPTS_DIAGNOSTIC_MODE: device_type.lower() == "diagnostic",
+        OPTS_VERBOSE_STATUS_MODE: False,
+        OPTS_ASSUME_OFFLINE_SEC: DEFAULT_ASSUME_OFFLINE_SEC,
+        OPTS_RESET_SENSORS_ON_OFFLINE: DEFAULT_RESET_SENSORS_ON_OFFLINE,
+        OPTS_ENERGY_UPDATE_INTERVAL_SEC: DEFAULT_ENERGY_UPDATE_INTERVAL_SEC,
+    }
+
+
+def _add_new_account_devices(hass: HomeAssistant, entry: ConfigEntry, found) -> dict[str, DeviceData]:
+    """Store the account's devices this entry does not have yet, when their type is known."""
+    from .devices.sn_prefixes import is_unsupported
+
+    data = {**entry.data, CONF_DEVICE_LIST: dict(entry.data[CONF_DEVICE_LIST])}
+    options = {**entry.options, CONF_DEVICE_LIST: dict(entry.options[CONF_DEVICE_LIST])}
+    added = []
+    for info in found:
+        if info.sn in data[CONF_DEVICE_LIST] or info.device_type == "DIAGNOSTIC" or is_unsupported(info.sn):
+            continue
+        data[CONF_DEVICE_LIST][info.sn] = {CONF_DEVICE_NAME: info.name, CONF_DEVICE_TYPE: info.device_type}
+        options[CONF_DEVICE_LIST][info.sn] = default_device_options(info.device_type)
+        added.append(info.sn)
+    if not added:
+        return {}
+    _LOGGER.info("Adding %d new device(s) found in the account", len(added))
+    # before the update listener is registered, so this does not reload the entry
+    hass.config_entries.async_update_entry(entry, data=data, options=options)
+    new_devices = extract_devices(entry)
+    return {sn: new_devices[sn] for sn in added}
+
+
+async def _discover_packs(api_client: EcoflowApiClient) -> list:
+    """Group linked STREAM units into the systems the app shows, when the API can list them."""
+    fetch_systems = getattr(api_client, "fetch_systems", None)
+    if fetch_systems is None:
+        return []
+    from .devices.internal.stream_ac_5000 import StreamAC5000
+    from .devices.internal.stream_pack import build_packs
+
+    sns = [sn for sn, device in api_client.devices.items() if isinstance(device, StreamAC5000)]
+    if len(sns) < 2:
+        return []
+    try:
+        systems = await fetch_systems(sns)
+    except Exception as ex:
+        # without the system list each unit still works on its own
+        _LOGGER.warning("Could not list EcoFlow systems, STREAM units stay ungrouped: %s", ex)
+        return []
+    return build_packs(systems, api_client.devices)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
