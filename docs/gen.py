@@ -9,7 +9,7 @@ from unittest.mock import Mock
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.frame import async_setup as frame_setup
 
-from custom_components.ecoflow_cloud.api.message import PrivateAPIMessageProtocol
+from custom_components.ecoflow_cloud.api.message import OpenAPICommand, PrivateAPIMessageProtocol
 from custom_components.ecoflow_cloud.binary_sensor import MiscBinarySensorEntity
 from custom_components.ecoflow_cloud.device_data import DeviceData, DeviceOptions
 from custom_components.ecoflow_cloud.devices import BaseDevice, EcoflowDeviceInfo
@@ -159,6 +159,8 @@ class DocumentationGenerator:
         total_selects = 0
         for device in base_devices:
             client = Mock()
+            # document the app-API commands, which every entry of an app-API device can send
+            client.has_open_api = False
             client.device = device
             total_sensors += len(device.sensors(client))
             total_binary_sensors += len(device.binary_sensors(client))
@@ -312,6 +314,8 @@ class MarkdownRenderer:
                 json_dict = command_dict
             elif isinstance(command_dict, PrivateAPIMessageProtocol):
                 json_dict = command_dict.to_dict()
+            elif isinstance(command_dict, OpenAPICommand):
+                json_dict = {**command_dict.envelope, "params": command_dict.params}
             else:
                 raise TypeError(f"Unsupported command_dict type: {type(command_dict).__name__}")
 
@@ -413,6 +417,7 @@ class MarkdownRenderer:
     def render_device_summary(self, device: BaseDevice, brief: bool = False) -> str:
         """Render complete device summary to markdown."""
         client = Mock()
+        client.has_open_api = False
         client.device = device
         res = ""
 

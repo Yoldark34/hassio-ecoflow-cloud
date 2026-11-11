@@ -6,6 +6,12 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![HACS validation](https://github.com/tolwi/hassio-ecoflow-cloud/workflows/Validate%20with%20hassfest%20and%20HACS/badge.svg)](https://github.com/tolwi/hassio-ecoflow-cloud/actions?query=workflow:"Validate%20with%20hassfest%20and%20HACS")
 
+> **This is a fork** of [tolwi/hassio-ecoflow-cloud](https://github.com/tolwi/hassio-ecoflow-cloud)
+> on the `stream-5000-hybrid` branch. It adds a hybrid mode (app API + public API in one
+> entry), discovery of every device of the account, STREAM 5000 / AC 5000 packs, and
+> entities that turn unavailable when a device is off. See
+> [What this fork changes](#what-this-fork-changes).
+
 Inspired by [hassio-ecoflow](https://github.com/vwt12eh8/hassio-ecoflow) and [ecoflow-mqtt-prometheus-exporter](https://github.com/berezhinskiy/ecoflow-mqtt-prometheus-exporter) this integration uses EcoFlow MQTT Broker `mqtt.ecoflow.com` to monitor and control the device.
 
 ## Installation
@@ -13,16 +19,20 @@ Inspired by [hassio-ecoflow](https://github.com/vwt12eh8/hassio-ecoflow) and [ec
 ### HACS installation
 The quickest way to install this integration is via [HACS](https://github.com/hacs/integration) by clicking the button below:
 
-[![Add to HACS via My Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tolwi&repository=hassio-ecoflow-cloud&category=Integration)
+[![Add to HACS via My Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Yoldark34&repository=hassio-ecoflow-cloud&category=Integration)
 
-1. Click above to install as a custom repository via HACS
+1. Click above to install as a custom repository via HACS, and pick the
+   `stream-5000-hybrid` branch
 2. Restart Home Assistant
 3. Once restart is done, use `Add Integration` → `EcoflowCloud`.
 
 ### 🌍 Regional API Hosts (Important for European Users)
-EcoFlow strictly separates accounts by region. If you encounter the error `Account doesn't exist or incorrect password` during the integration setup, verify your `api_host` setting:
-- **Global / US:** `api.ecoflow.com` (Default)
-- **Europe:** `api-e.ecoflow.com`
+EcoFlow strictly separates accounts by region. If you encounter the error `Account doesn't exist or incorrect password` during the integration setup, pick the region of your account. Each host field is a region selector that shows its host:
+
+| Region | Application API | Public API |
+|---|---|---|
+| EU | `EU - api-e.ecoflow.com` | `EU - api-e.ecoflow.com` |
+| US | `US - api.ecoflow.com` | `US - api-a.ecoflow.com` |
 
 ### Manual installation options
 - Install as a [custom repository](https://github.com/tolwi/hassio-ecoflow-cloud) via [HACS](https://github.com/hacs/integration)
@@ -41,9 +51,17 @@ Currently: OCEAN Pro (US) with its OCEAN Smart Electrical Panel 40.
 
 ## EcoFlow API modes
 
-The integration supports two EcoFlow cloud API modes. They expose different data,
+The integration supports three EcoFlow cloud API modes. They expose different data,
 so the same physical device can have different entities depending on the mode
 selected during setup.
+
+- **Application API and public API (recommended)** uses both in one entry: the
+  public API wherever it serves a device (its values, its online/offline pushes,
+  its documented commands) and the application API for what the public API does
+  not publish, such as each battery's own power or its role in a pack. It needs
+  the app login and developer keys from the
+  [EcoFlow developer portal](https://developer-eu.ecoflow.com/). An application
+  API entry can take developer keys later from its reconfiguration menu.
 
 - `private_api` uses the same internal cloud endpoints as the EcoFlow app. It
   usually exposes more telemetry and controls, but it is unofficial and can
@@ -56,6 +74,55 @@ If an entity is missing or behaves differently from the EcoFlow app, first check
 the device section below for the API mode you configured. When reporting a bug,
 include the API mode, device model, firmware version, and a diagnostic download
 from Home Assistant.
+
+## What this fork changes
+
+### One entry per account, devices found automatically
+
+Adding the integration asks for the API mode and the credentials, nothing else.
+After the login every device of the account (shared ones included) is listed,
+typed from its serial number, with the supported ones preselected. With
+*Add new devices of the account automatically* left on, a device added to the
+account later shows up at the next start of Home Assistant without reconfiguring.
+
+The entry is named after the home of the EcoFlow app, and a device placed in a
+room of that home gets the room as its suggested area. Adding the integration
+again with an account that already has an entry continues as that entry's
+reconfiguration.
+
+### Offline devices are unavailable
+
+A device that is switched off or disconnected shows its entities as unavailable
+instead of keeping its last values. With the public API the offline push arrives
+within seconds; otherwise silence for *assume offline* seconds, confirmed by the
+account's device list, ends the same way.
+
+### STREAM 5000 / STREAM AC 5000 packs
+
+Linked STREAM 5000 (`ES21`) and STREAM AC 5000 (`ES22`) batteries become one pack
+device, named after the app's system, with each battery under it:
+
+- the pack carries what the batteries share: system battery level and power,
+  house load, house grid power, solar, inverter output, the meter, and the
+  settings (work mode, backup reserve, charge and discharge limits, feed-in and
+  charging power limits, feed-in limit switch)
+- *Pack Status* reads `ready`, `degraded` (a battery is missing), `waiting` or
+  `offline`, and *Master Unit* names the battery that leads
+- each battery keeps its own values: battery level, signed battery power (>0
+  charging, <0 discharging), inverter and house output power, backup socket,
+  remaining energy and times, AC socket, X-Boost, UPS, and its *Pack Role*
+  (master, slave or election). Solar inputs exist only on the STREAM 5000
+- a pack setting goes to the master, or to any battery that is online, since
+  every battery applies it to the whole pack
+
+The master is the one the batteries elect and report; until a battery has
+reported its role, the app's main unit is taken.
+
+### Decoding fixes for the STREAM AC 5000
+
+- battery power fields are signed (zigzag) integers, not unsigned half-watts
+- the master lists every battery of the pack; each battery now reads its own
+  entry instead of the last one of the list
 
 ## Disclaimers
 
@@ -2281,7 +2348,7 @@ from Home Assistant.
 
 </p></details>
 
-<details><summary> STREAM_AC_5000 <i>(sensors: 30, binary_sensors: 1, switches: 3, sliders: 4, selects: 1)</i> </summary>
+<details><summary> STREAM_AC_5000 <i>(sensors: 44, binary_sensors: 1, switches: 4, sliders: 5, selects: 1)</i> </summary>
 <p>
 
 *Sensors*
@@ -2290,22 +2357,19 @@ from Home Assistant.
 - Battery Level (BMS)  _(disabled)_
 - Battery Level (pack)  _(disabled)_
 - Stored Energy
+- Remaining Energy
+- Full Energy  _(disabled)_
 - Remaining Time
 - Charge Remaining Time  _(disabled)_
 - Discharge Remaining Time  _(disabled)_
-- Grid Port Power
 - Battery Power
+- Battery Power (magnitude)  _(disabled)_
+- Grid Port Power
+- Inverter Power
+- House Output Power
+- Unit Backup Port Power
 - Charge Power Limit  _(disabled)_
 - Max Discharge Power  _(disabled)_
-- Feed-in Power Max  _(disabled)_
-- Power Grid Global
-- Power Grid L1
-- Power Grid L2
-- Power Grid L3
-- Power Grid (L1) Volts  _(disabled)_
-- Power Grid (L2) Volts  _(disabled)_
-- Power Grid (L3) Volts  _(disabled)_
-- Power Grid Frequency  _(disabled)_
 - Min Cell Volts  _(disabled)_
 - Max Cell Volts  _(disabled)_
 - Real State of Health  _(disabled)_
@@ -2314,7 +2378,24 @@ from Home Assistant.
 - Cumulative Capacity Discharge (mAh)  _(disabled)_
 - Cumulative Energy Charge (Wh)
 - Cumulative Energy Discharge (Wh)
+- Pack Role
 - Status
+- Battery Level
+- Battery Power
+- House Load Power
+- House Grid Power
+- Solar Power
+- Inverter Output Power
+- Backup Port Power  _(disabled)_
+- Power Grid Global
+- Power Grid L1
+- Power Grid L2  _(disabled)_
+- Power Grid L3  _(disabled)_
+- Power Grid (L1) Volts  _(disabled)_
+- Power Grid (L2) Volts  _(disabled)_
+- Power Grid (L3) Volts  _(disabled)_
+- Power Grid Frequency  _(disabled)_
+- Feed-in Power Max  _(disabled)_
 
 *Binary sensors*
 - P1 Meter Link
@@ -2323,10 +2404,12 @@ from Home Assistant.
 - AC Output
 - X-Boost
 - UPS Mode
+- Backup Reserve
 
 *Sliders (numbers)*
 - Max Charge Level
 - Min Discharge Level
+- Backup Reserve Level
 - Net Power Out Limit
 - Net Power In Limit
 

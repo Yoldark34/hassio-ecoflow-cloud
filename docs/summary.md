@@ -2218,7 +2218,7 @@
 
 </p></details>
 
-<details><summary> STREAM_AC_5000 <i>(sensors: 30, binary_sensors: 1, switches: 3, sliders: 4, selects: 1)</i> </summary>
+<details><summary> STREAM_AC_5000 <i>(sensors: 44, binary_sensors: 1, switches: 4, sliders: 5, selects: 1)</i> </summary>
 <p>
 
 *Sensors*
@@ -2227,22 +2227,19 @@
 - Battery Level (BMS)  _(disabled)_
 - Battery Level (pack)  _(disabled)_
 - Stored Energy
+- Remaining Energy
+- Full Energy  _(disabled)_
 - Remaining Time
 - Charge Remaining Time  _(disabled)_
 - Discharge Remaining Time  _(disabled)_
-- Grid Port Power
 - Battery Power
+- Battery Power (magnitude)  _(disabled)_
+- Grid Port Power
+- Inverter Power
+- House Output Power
+- Unit Backup Port Power
 - Charge Power Limit  _(disabled)_
 - Max Discharge Power  _(disabled)_
-- Feed-in Power Max  _(disabled)_
-- Power Grid Global
-- Power Grid L1
-- Power Grid L2
-- Power Grid L3
-- Power Grid (L1) Volts  _(disabled)_
-- Power Grid (L2) Volts  _(disabled)_
-- Power Grid (L3) Volts  _(disabled)_
-- Power Grid Frequency  _(disabled)_
 - Min Cell Volts  _(disabled)_
 - Max Cell Volts  _(disabled)_
 - Real State of Health  _(disabled)_
@@ -2251,7 +2248,24 @@
 - Cumulative Capacity Discharge (mAh)  _(disabled)_
 - Cumulative Energy Charge (Wh)
 - Cumulative Energy Discharge (Wh)
+- Pack Role
 - Status
+- Battery Level
+- Battery Power
+- House Load Power
+- House Grid Power
+- Solar Power
+- Inverter Output Power
+- Backup Port Power  _(disabled)_
+- Power Grid Global
+- Power Grid L1
+- Power Grid L2  _(disabled)_
+- Power Grid L3  _(disabled)_
+- Power Grid (L1) Volts  _(disabled)_
+- Power Grid (L2) Volts  _(disabled)_
+- Power Grid (L3) Volts  _(disabled)_
+- Power Grid Frequency  _(disabled)_
+- Feed-in Power Max  _(disabled)_
 
 *Binary sensors*
 - P1 Meter Link
@@ -2260,10 +2274,12 @@
 - AC Output
 - X-Boost
 - UPS Mode
+- Backup Reserve
 
 *Sliders (numbers)*
 - Max Charge Level
 - Min Discharge Level
+- Backup Reserve Level
 - Net Power Out Limit
 - Net Power In Limit
 
