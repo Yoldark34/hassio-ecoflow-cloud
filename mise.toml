@@ -37,6 +37,11 @@ depends = ["sync"]
 dir = "custom_components"
 run = "uv run ruff check --exit-zero --statistics ."
 
+[tasks.test]
+description = "Run the test suite"
+depends = ["sync"]
+run = "uv run pytest -q"
+
 [tasks.protoc]
 tools.protoc = "32.0"
 dir = "custom_components/ecoflow_cloud/devices/internal/proto"
