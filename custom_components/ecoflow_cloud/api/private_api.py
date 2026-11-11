@@ -115,7 +115,9 @@ class EcoflowPrivateApiClient(EcoflowApiClient):
             target_devices = {device_sn: self.devices[device_sn]}
 
         for sn, device in target_devices.items():
-            self.send_get_message(sn, device.get_quota_message())
+            # a pack has no topic of its own: its units answer for it
+            if device.device_info.get_topic:
+                self.send_get_message(sn, device.get_quota_message())
 
     def _device_registry(self) -> dict[str, Any]:
         from ..devices.registry import devices

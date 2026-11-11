@@ -148,3 +148,32 @@ async def test_hybrid_client_sends_open_commands_on_the_open_broker(hass, pack, 
     client.open_mqtt_client.publish.assert_called_once()
     assert client.open_mqtt_client.publish.call_args.args[0] == f"/open/acct/{ES21}/set"
     client.mqtt_client.publish.assert_not_called()
+
+
+async def test_quota_requests_skip_the_pack(hass, pack, units):
+    client = EcoflowPrivateApiClient("api-e.ecoflow.com", "u", "p", "Home")
+    _wire(client, units, pack)
+    await client.quota_all(None)
+    topics = [call.args[0] for call in client.mqtt_client.publish.call_args_list]
+    assert sorted(topics) == sorted(u.device_info.get_topic for u in units.values())
+
+
+def test_the_pack_hands_each_unit_its_entry_from_the_master(pack, units):
+    slave = units[ES22].data.params
+    assert slave["gridPortPower"] < -300
+    assert slave["unitInverterPower"] > 300
+    assert 60 <= slave["soc"] <= 75
+    assert abs(units[ES21].data.params["gridPortPower"]) < 50
+
+
+async def test_solar_sensors_only_on_units_with_solar_inputs(hass, pack, units):
+    for device in units.values():
+        device.configure(hass)
+    client = fake_client()
+
+    def enabled_keys(device):
+        return {e.mqtt_key for e in device.sensors(client) if getattr(e, "enabled_default", False)}
+
+    assert {"unitPvPower", "pv1Power", "pv4Power"} <= enabled_keys(units[ES21])
+    assert not any(k.startswith(("pv", "unitPv")) for k in enabled_keys(units[ES22]))
+    assert {"unitOnGridPower", "remainCap", "batteryPower"} <= enabled_keys(units[ES22])

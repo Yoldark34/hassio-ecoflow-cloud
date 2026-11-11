@@ -106,6 +106,24 @@ KEY_SYSTEM_GROUP = "systemGroupId"
 KEY_SYSTEM_UNITS = "systemDevCnt"
 SYSTEM_ROLES = {0: "election", 1: "master", 2: "slave"}
 
+# Models with solar inputs, by serial prefix
+SOLAR_PREFIXES = ("ES21",)
+
+# Another unit's figures as the master lists them: unit.<sn>.<key>
+UNIT_PREFIX = "unit."
+# Block 50 fields of one unit, and the keys they take on that unit
+UNIT_FLOW_KEYS = (
+    ("gridPortPower", "gridPortPower"),
+    ("pvSelfPwr", "unitPvPower"),
+    ("invPwr", "unitInverterPower"),
+    ("onGridPwr", "unitOnGridPower"),
+    ("backupPwr", "unitBackupPower"),
+    ("pv1Pwr", "pv1Power"),
+    ("pv2Pwr", "pv2Power"),
+    ("pv3Pwr", "pv3Power"),
+    ("pv4Pwr", "pv4Power"),
+)
+
 SYS_ENERGY_FIELDS = ("loadPwr", "gridPwr", "pvPwr", "bpPwr", "bpSoc", "onGridPwr", "backupPwr")
 
 # Work modes as the app numbers them; the open API sends their names.
@@ -398,7 +416,7 @@ class StreamAC5000(BaseInternalDevice):
             StoredEnergyFromSocSensorEntity(
                 client, self, "cmsBattFullEnergy", "f32ShowSoc", const.STREAM_STORED_ENERGY
             ),
-            EnergyStorageSensorEntity(client, self, "remainCap", const.STREAM_AC5000_REMAIN_ENERGY, False),
+            EnergyStorageSensorEntity(client, self, "remainCap", const.STREAM_AC5000_REMAIN_ENERGY),
             EnergyStorageSensorEntity(client, self, "cmsBattFullEnergy", const.STREAM_AC5000_FULL_ENERGY, False),
             # cmsMaxChgSoc / cmsMinDsgSoc are writable, so they live in numbers().
             # RemainSensorEntity clamps the device's 5939 "unknown" sentinel to 0.
@@ -410,6 +428,9 @@ class StreamAC5000(BaseInternalDevice):
             WattsSensorEntity(client, self, KEY_BATTERY_POWER, const.STREAM_AC5000_BATTERY_POWER),
             WattsSensorEntity(client, self, "bpPower", const.STREAM_AC5000_BATTERY_POWER_MAGNITUDE, False),
             WattsSensorEntity(client, self, "gridPortPower", const.STREAM_AC5000_GRID_PORT_POWER),
+            WattsSensorEntity(client, self, "unitInverterPower", const.STREAM_AC5000_UNIT_INVERTER_POWER),
+            WattsSensorEntity(client, self, "unitOnGridPower", const.STREAM_AC5000_UNIT_ON_GRID_POWER),
+            WattsSensorEntity(client, self, "unitBackupPower", const.STREAM_AC5000_UNIT_BACKUP_POWER),
             WattsSensorEntity(client, self, "maxChgPow", const.STREAM_AC5000_CHARGE_POWER_LIMIT, False),
             WattsSensorEntity(client, self, "maxDsgPow", const.STREAM_AC5000_MAX_DISCHARGE_POWER, False),
             # --- pack health --------------------------------------------
@@ -425,8 +446,21 @@ class StreamAC5000(BaseInternalDevice):
             RoleSensorEntity(client, self, KEY_SYSTEM_ROLE, const.STREAM_AC5000_ROLE),
             StatusSensorEntity(client, self),
         ]
+        if self.has_solar_inputs:
+            unit += [
+                WattsSensorEntity(client, self, "unitPvPower", const.STREAM_AC5000_UNIT_PV_POWER),
+                WattsSensorEntity(client, self, "pv1Power", const.STREAM_POWER_PV_1),
+                WattsSensorEntity(client, self, "pv2Power", const.STREAM_POWER_PV_2),
+                WattsSensorEntity(client, self, "pv3Power", const.STREAM_POWER_PV_3),
+                WattsSensorEntity(client, self, "pv4Power", const.STREAM_POWER_PV_4),
+            ]
         system = self._system(client)
         return unit + (system.sensors() if system else [])
+
+    @property
+    def has_solar_inputs(self) -> bool:
+        """The STREAM 5000 (ES21) has four solar inputs; the AC 5000 (ES22) has none."""
+        return self.device_info.sn.startswith(SOLAR_PREFIXES)
 
     def binary_sensors(self, client: EcoflowApiClient) -> list[BinarySensorEntity]:
         system = self._system(client)
@@ -587,10 +621,15 @@ class StreamAC5000(BaseInternalDevice):
             "minCellVol",
             "maxCellVol",
         )
-        self._copy(message.cms, params, "cmsBattFullEnergy", "remainTime")
-        # Block 54 owns soc: same scale as block 44 but sent far more often.
-        self._copy(message.statPack.stat, params, "soc")
-        self._copy(message.powerPack.power, params, "gridPortPower")
+        # Block 44 is this unit's own report, and the only SoC a pack's slave sends itself
+        self._copy(message.cms, params, "cmsBattFullEnergy", "remainTime", "soc")
+        # Blocks 50 and 54 list every unit of a pack. This unit keeps its own entry; the
+        # others' go under unit.<sn>.<key>, for the pack to hand to those units.
+        own = self.device_info.sn
+        for stat in message.statPack.stat:
+            self._copy_unit_entry(stat, own, params, ("soc", "soc"))
+        for power in message.powerPack.power:
+            self._copy_unit_entry(power, own, params, *UNIT_FLOW_KEYS)
         self._copy(message.deviceCfg, params, "upsEnabled", ("xboostEnabled", _KEY_XBOOST))
         self._copy(message.powerLimits, params, "feedGridModePowLimit", "chgPowLimit")
         self._copy(message.acOut, params, ("enabled", _KEY_AC_OUT))
@@ -615,6 +654,16 @@ class StreamAC5000(BaseInternalDevice):
             ("systemGroupId", KEY_SYSTEM_GROUP),
             ("systemDevCnt", KEY_SYSTEM_UNITS),
         )
+
+    def _copy_unit_entry(
+        self, entry: Any, own_sn: str, params: dict[str, Any], *fields: tuple[str, str]
+    ) -> None:
+        if not entry.HasField("sn"):
+            return
+        prefix = "" if entry.sn == own_sn else f"{UNIT_PREFIX}{entry.sn}."
+        # an entry is the unit's whole snapshot, and zero values are left off the wire
+        for name, key in fields:
+            params[f"{prefix}{key}"] = getattr(entry, name)
 
     @staticmethod
     def _copy_prefixed(source: Any, params: dict[str, Any], prefix: str, *fields: str) -> None:

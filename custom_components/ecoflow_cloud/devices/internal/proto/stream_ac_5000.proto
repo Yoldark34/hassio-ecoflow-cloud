@@ -17,8 +17,8 @@ syntax = "proto3";
 // than guessed; protobuf skips unknown fields, so this is lossless.
 //
 // Floats are watts. Signed integer powers are sint32 (zigzag): read as uint32
-// they look like unsigned half-watts, which is how blocks 38 and 44 were first
-// read. gridPortPowerHalfW in block 54 may be the same and is left unverified.
+// they look like unsigned half-watts, which is how blocks 38, 44 and 54 were
+// first read. Blocks 50 and 54 are lists with one entry per unit of a pack.
 
 // ---------------------------------------------------------------- cmd_id 2 --
 
@@ -120,27 +120,38 @@ message StreamAC5000BackupConfig {
     optional uint32 backupSoc = 2;
 }
 
-// Block 50.1 -- per-serial power.
+// Block 50 -- the master's energy flow of every unit in the pack, one entry per
+// serial (a lone unit lists itself). Only the master sends it.
 message StreamAC5000DevicePower {
     optional string sn = 1;
     optional float soc = 2;
-    optional float gridPortPower = 4;  // W; >0 = into the port (charging),
-                                       //     <0 = out of the port (discharging)
+    optional float pvSelfPwr = 3;      // W, this unit's solar
+    optional float gridPortPower = 4;  // W, this unit's battery: >0 charging,
+                                       //    <0 discharging (the app's bp_pwr)
+    optional uint32 onGridState = 5;
+    optional float invPwr = 6;         // W, inverter
+    optional float onGridPwr = 7;      // W, to the house
+    optional float backupPwr = 8;      // W, backup socket
+    optional float pv1Pwr = 9;
+    optional float pv2Pwr = 10;
+    optional float pv3Pwr = 11;
+    optional float pv4Pwr = 12;
 }
 
 message StreamAC5000PowerPack {
-    optional StreamAC5000DevicePower power = 1;
+    repeated StreamAC5000DevicePower power = 1;
 }
 
-// Block 54.1 -- same power in half-watts, plus SoC.
+// Block 54 -- the master's battery view of every unit, one entry per serial.
 message StreamAC5000DeviceStat {
     optional string sn = 1;
     optional uint32 soc = 2;
-    optional uint32 gridPortPowerHalfW = 4;
+    optional uint32 heatState = 3;
+    optional sint32 bpPower = 4;  // W, same sign as block 50
 }
 
 message StreamAC5000StatPack {
-    optional StreamAC5000DeviceStat stat = 1;
+    repeated StreamAC5000DeviceStat stat = 1;
 }
 
 message StreamAC5000Runtime {

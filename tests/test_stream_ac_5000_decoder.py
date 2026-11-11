@@ -94,3 +94,17 @@ def test_pack_values_use_the_open_api_names(es21, es22):
         # the pack discharges into the house
         assert params["sysEnergyStreamReport.bpPwr"] < -300
         assert params["sysEnergyStreamReport.onGridPwr"] > 300
+
+
+def test_the_master_keeps_its_own_entry_of_the_unit_lists(es21):
+    # blocks 50/54 list both units; the last entry (ES22, discharging) used to overwrite ES21's
+    assert abs(es21["gridPortPower"]) < 50
+    assert es21["unitInverterPower"] < 50
+    other = f"unit.{SERIALS['ES22']}."
+    assert es21[other + "gridPortPower"] < -300
+    assert es21[other + "unitInverterPower"] > 300
+    assert 60 <= es21[other + "soc"] <= 75
+
+
+def test_a_slave_sends_no_unit_list(es22):
+    assert not any(key.startswith("unit.") for key in es22)

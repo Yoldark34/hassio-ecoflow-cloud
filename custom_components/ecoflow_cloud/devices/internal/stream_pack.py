@@ -28,6 +28,7 @@ from custom_components.ecoflow_cloud.devices.data_holder import EcoflowDataHolde
 from custom_components.ecoflow_cloud.devices.internal.stream_ac_5000 import (
     KEY_SYSTEM_ROLE,
     KEY_SYSTEM_UNITS,
+    UNIT_PREFIX,
     StreamAC5000,
     StreamSystemControls,
 )
@@ -130,6 +131,7 @@ class StreamPack(BaseDevice):
         self._on_member_params(dict(member.data.params))
 
     def _on_member_params(self, params: dict[str, Any]) -> None:
+        self._hand_out_unit_entries(params)
         shared = {key: value for key, value in params.items() if is_pack_key(key)}
         if KEY_METER_LINK in params:
             # only the unit wired to the meter has it; the others send an empty block
@@ -138,6 +140,19 @@ class StreamPack(BaseDevice):
             shared[KEY_MASTER_SN] = self.master_sn()
         if shared:
             self.data.add_data(PreparedData(None, {"params": shared}, None))
+
+    def _hand_out_unit_entries(self, params: dict[str, Any]) -> None:
+        """The master lists every unit's SoC and power: give each unit its own entry."""
+        per_unit: dict[str, dict[str, Any]] = {}
+        for key, value in params.items():
+            if key.startswith(UNIT_PREFIX):
+                sn, _, name = key[len(UNIT_PREFIX) :].partition(".")
+                per_unit.setdefault(sn, {})[name] = value
+        for sn, values in per_unit.items():
+            member = self.member(sn)
+            if member is not None:
+                # relayed, so it says nothing about whether that unit itself is reachable
+                member.data.add_data(PreparedData(None, {"params": values}, None, is_auto=False))
 
     def master_sn(self) -> str | None:
         for member in self.members:
